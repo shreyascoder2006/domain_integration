@@ -334,8 +334,7 @@ async function poll() {
   }
 }
 async function loadMailboxes() {
-  const list = await api('/api/mailboxes');
-  const mine = list.filter((m) => m.orderId === S.order.id);
+  const mine = await api(`/api/orders/${S.order.id}/mailboxes`);
   $('#mbx').innerHTML = `<div class="card" style="margin-top:16px"><b>Connected mailboxes</b><table><tr><th>Email</th><th>Provider</th><th>Warm-up</th></tr>
     ${mine.map((m) => `<tr><td>${esc(m.email)}</td><td>${esc(m.provider)}</td><td>${esc(m.warmup)}</td></tr>`).join('')}</table></div>`;
 }

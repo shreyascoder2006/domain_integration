@@ -7,7 +7,29 @@ Vendors are hidden from the customer (white-label).
 ## Run
 
     npm start          # http://localhost:3000, mock adapters, no keys needed
-    npm test           # 72 tests: pricing, adapters against simulated accounts (fake HTTP), crypto, refunds, pipeline, payments, billing
+    npm test           # 85 tests: pricing, adapters against simulated accounts (fake HTTP), crypto, refunds, pipeline, payments, billing, operations
+
+Admin dashboard: `/admin.html` (needs `ADMIN_TOKEN`). Orders needing attention come first: failed provisioning, past-due or
+suspended billing, failed domain renewals, plan-change errors. Expand an order for raw errors, billing history and
+renewals; retry provisioning, refund, or cancel from there. It also shows vendor wallet and free mailbox slots.
+
+## Running it for real
+
+1. Copy `.env.example` to `.env` and fill it in (comments sit on their own lines because Docker's env-file parser
+   would otherwise keep them in the value). Run with `node --env-file=.env server.js`, or `docker build -t cl . && docker run --env-file .env -v cl-data:/app/data -p 3000:3000 cl`.
+2. **Startup refuses unsafe configs.** With `NODE_ENV=production` it will not start with a missing `CREDENTIALS_KEY`,
+   an `ADMIN_TOKEN` under 24 characters, or any `mock` adapter (`ALLOW_MOCKS=1` overrides, for demos). Missing webhook
+   secrets are warnings.
+3. `GET /healthz` returns `{"ok":true}` for load balancers. `SIGTERM`/`SIGINT` stop the server cleanly; anything half-done
+   is resumable, so it is picked up on the next start.
+4. Put it behind HTTPS and set `TRUST_PROXY=1`, otherwise every visitor shares one rate-limit bucket.
+5. **Data**: everything lives in one JSON file (`DATA_FILE`). Writes are atomic (temp file + rename) and the previous
+   copy is kept as `<file>.bak`. If the file is ever unreadable the server **refuses to start** and keeps a copy
+   (`<file>.corrupt-<time>`) instead of starting empty. Back this file up: it holds orders, billing state and encrypted
+   credentials. Replace with a real database when integrating (see "Before going live").
+6. **Protection**: per-IP rate limits (domain search 30/min, checkout 10/min, confirm 30/min, cancel 10/min), 10 wrong
+   admin tokens lock the address out for 15 minutes, security headers on every response, buyers' contact details never
+   appear in the public order view, and the all-mailboxes list is admin-only.
 
 ## Payment flow (Razorpay)
 
@@ -96,7 +118,9 @@ Customers only ever see generic messages: vendor names, raw errors and costs are
 - `lib/validate.js` cart and contact validation; `lib/money.js` minor-unit conversion
 - `lib/providers/` adapters: `mock.js`, `namesilo.js`, `cloudflare.js`, `zapmail.js`, `razorpay.js`
 - `lib/errors.js` `PendingError` for "still working, check later"
-- `server.js` API; `public/index.html` 5-step wizard + live progress
+- `lib/vendorHooks.js` vendor webhooks: wake waiting steps early (never the source of truth)
+- `lib/ratelimit.js` per-client rate limiter; `lib/startup.js` refuses unsafe configurations
+- `server.js` API; `public/index.html` 5-step wizard + live progress; `public/admin.html` operations dashboard
 
 ## Configuration (env)
 
@@ -115,7 +139,11 @@ Customers only ever see generic messages: vendor names, raw errors and costs are
 | `ZAPMAIL_WORKSPACE_KEY` | recommended: Zapmail's connection-requests endpoint requires it |
 | `ZAPMAIL_NAMESERVERS` | comma list. Zapmail's docs show four conflicting sets; the default is from the current connect-domain page. **Confirm with Zapmail** |
 | `ZAPMAIL_BASE_URL` | optional |
-| `POLL_INTERVAL_MS`, `WAIT_TIMEOUT_MS`, `RETRY_BASE_MS` | resume timer (0 disables), max wait for a pending step, retry back-off |
+| `ZAPMAIL_WEBHOOK_SECRET` | optional: endpoint secret for `POST /api/webhooks/zapmail`; makes provisioning finish in seconds instead of waiting for the next poll |
+| `POLL_INTERVAL_MS`, `WAIT_TIMEOUT_MS`, `RETRY_BASE_MS` | resume timer (0 disables), max wait for a pending step, quick-retry back-off (default 1 s) |
+| `TRUST_PROXY` | `1` behind a reverse proxy so rate limits use the real client address |
+| `ALLOW_MOCKS` | `1` lets `NODE_ENV=production` run with mock adapters (demo only) |
+| `RATE_LIMIT` | `off` disables rate limits (tests only) |
 | `NAMESILO_API_KEY` | required for `namesilo`. Server IP must be allowlisted in NameSilo (error 113 otherwise) |
 | `NAMESILO_BASE_URL` | optional, e.g. NameSilo's sandbox base (they issue sandbox credentials on request) |
 | `NAMESILO_AUTO_RENEW` | `0` (default) or `1`: registrar-side auto-renew |
@@ -136,13 +164,16 @@ Generate a credentials key: `node -e "console.log(require('crypto').randomBytes(
     POST /api/checkout/:id/confirm   ({paymentId, signature}; idempotent, creates the order)
     GET  /api/checkout/:id           (status, and the order once a webhook has created it)
     POST /api/webhooks/razorpay      (raw body + X-Razorpay-Signature)
+    POST /api/webhooks/zapmail       (raw body + X-Zapmail-Signature; only wakes waiting steps)
     GET  /api/orders/:id             (includes a safe billing summary: next charge, payment failed, service end)
+    GET  /api/orders/:id/mailboxes   (that order's mailboxes; credentials never returned; suspended ones have status "suspended")
     POST /api/orders/:id/cancel      (x-manage-token; cancels at the end of the paid period)
-    POST /api/orders/:id/retry
-    GET  /api/mailboxes         (credentials never returned; suspended mailboxes have status "suspended")
+    GET  /healthz
 
     # admin (x-admin-token)
-    GET  /api/admin/orders                 (adds internal margin, full billing state + history, refunds, suggested refund)
+    GET  /api/admin/orders                 (adds internal margin, contact, raw step errors, full billing state + history, refunds, suggested refund)
+    GET  /api/admin/mailboxes              (all mailboxes)
+    POST /api/admin/orders/:id/retry       (resume a partially failed order)
     POST /api/admin/orders/:id/cancel      ({atCycleEnd?: true})
     POST /api/admin/billing/tick           (run the billing timer now)
     POST /api/admin/orders/:id/refund      ({amount?, reason?}; defaults to the suggested pro-rata amount)
@@ -162,7 +193,11 @@ Generate a credentials key: `node -e "console.log(require('crypto').randomBytes(
   schemes, refunds (with `X-Refund-Idempotency`), webhook headers and test cards were all taken from
   razorpay.com/docs. Run only against a simulated account; **the checkout popup itself has not been opened**
   (needs real test keys).
-- None of the four has been run with real keys.
+- **Zapmail webhooks**: signature scheme (`t=<unix>,v1=HMAC-SHA256("<t>.<body>")`, 5-minute window) taken from their
+  docs; whether the `whsec_` prefix is part of the key is not stated, and the event names conflict between pages. Safe
+  either way: events only make waiting steps re-check sooner, so a wrong guess costs one poll, never an order.
+- None of the four has been run with real keys. The Dockerfile and the CI workflow have not been run either (no Docker
+  here; the workflow runs on GitHub), and `SIGTERM` handling is untested on Windows, where Node cannot catch it.
 
 ### Razorpay: things to do and check before launch
 
@@ -213,16 +248,18 @@ Generate a credentials key: `node -e "console.log(require('crypto').randomBytes(
 ## Before going live (not done yet)
 
 - A second mailbox vendor (Infraforge / Maildoso) as a fallback.
-- Checkouts never expire: a payment that lands hours later is still honoured, and if a domain was taken meanwhile
-  the order ends as `partial_failure` for an admin refund. Add an expiry and an availability re-check if that is not acceptable.
-- Zapmail webhooks (`mailbox.updated`, `domain.connection_status_changed`; HMAC-SHA256 `X-Zapmail-Signature`)
-  would replace polling for faster updates.
-- Replace the JSON store and the hard-coded `demo-user` with CloudLead's DB and auth.
+- A payment that lands after the customer left is still honoured (the webhook creates the order), and if a domain was
+  taken meanwhile the order ends as `partial_failure` for an admin refund. Unpaid checkouts are purged after 14 days.
+- **Replace the JSON store and the hard-coded `demo-user` with CloudLead's database and auth.** The JSON file is rewritten
+  in full on every change (fine for a prototype, not for load) and only one server process may use it. `lib/store.js` is
+  the single seam: keep its methods, swap the storage. Rate-limit counters are also per process (use Redis if you scale out).
 - Mailbox removal is only scheduled for the vendor's next renewal (Zapmail has no immediate delete, and the docs do
   not say whether the slot returns). The vendor's own subscription renewal is outside this app: keep their wallet funded.
 - The sending/warm-up engine must honour `suspended: true` on mailboxes, otherwise suspension has no effect.
 - Customers cannot change payment method, upgrade, or add mailboxes yet (the gateway's hosted page handles card changes
   for failed charges; adding mailboxes to an existing domain is blocked by the terms).
 - Customer cancellation uses a one-time manage token because this prototype has no accounts. Replace with real auth.
-- Rate limiting and abuse checks on domain suggest and order endpoints.
-- Provisioning retry delays are short (150 ms x attempt): lengthen for real services (e.g. NameSilo 268 "retry later").
+- No Content-Security-Policy yet: Razorpay's checkout loads scripts and frames from several of its own domains, and a
+  wrong policy would silently break payment. Add one once the popup can be tested with real test keys.
+- Abuse beyond rate limits (disposable emails, card-testing, domain-name abuse reports) is not handled.
+- Quick retries back off 1 s, 2 s, 3 s; anything slower is a `waiting` step that the timer re-checks (e.g. NameSilo 268 "retry later" is a hard error today: treat as pending if it shows up in practice).

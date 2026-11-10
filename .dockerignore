@@ -1,0 +1,10 @@
+node_modules
+data
+test
+docs
+.git
+.github
+.claude
+.env
+.env.*
+*.md

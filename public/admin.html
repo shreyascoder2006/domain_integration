@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>CloudLead Admin</title>
+<style>
+  :root{--bg:#f7f7fb;--card:#fff;--ink:#1b1b2f;--muted:#6b6b80;--line:#e4e4ee;--brand:#6a4df0;--soft:#f0edff;--ok:#16875a;--okbg:#e8f7f0;--err:#c0392b;--errbg:#fdecea;--warn:#a15c00;--warnbg:#fff3e0}
+  @media (prefers-color-scheme: dark){:root{--bg:#12121c;--card:#1b1b2b;--ink:#ecebf7;--muted:#9a99b3;--line:#2e2e45;--soft:#25214a;--okbg:#12301f;--errbg:#3a1a1a;--warnbg:#3a2a10;--warn:#f0b050}}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  header{padding:14px 24px;border-bottom:1px solid var(--line);background:var(--card);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  header b span{color:var(--brand)} header .sp{flex:1}
+  main{max-width:1200px;margin:0 auto;padding:20px 16px 60px}
+  input,select{font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--ink)}
+  button{font:inherit;padding:7px 12px;border-radius:7px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+  button.p{background:var(--brand);color:#fff;border-color:var(--brand)} button.d{color:var(--err)} button:disabled{opacity:.5;cursor:not-allowed}
+  .cards{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px} .card .n{font-size:24px;font-weight:700} .card .l{color:var(--muted);font-size:12px}
+  .card.bad .n{color:var(--err)}
+  .filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .filters button.on{background:var(--soft);border-color:var(--brand)}
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top} th{color:var(--muted);font-weight:500;font-size:12px}
+  tr.row{cursor:pointer} tr.row:hover{background:var(--soft)}
+  .tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;background:var(--line);color:var(--muted)}
+  .tag.ok{background:var(--okbg);color:var(--ok)} .tag.bad{background:var(--errbg);color:var(--err)} .tag.warn{background:var(--warnbg);color:var(--warn)}
+  .detail{background:var(--bg);padding:12px 16px} .detail h4{margin:10px 0 4px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .chips{display:flex;gap:6px;flex-wrap:wrap} .chip{font-size:12px;padding:2px 8px;border-radius:999px;background:var(--line)}
+  .chip.done{background:var(--okbg);color:var(--ok)} .chip.failed{background:var(--errbg);color:var(--err)} .chip.waiting,.chip.running{background:var(--soft);color:var(--brand)}
+  pre{margin:4px 0;white-space:pre-wrap;word-break:break-word;font-size:12px;color:var(--muted)}
+  .err{color:var(--err)} .muted{color:var(--muted)} .msg{padding:10px 12px;border-radius:8px;margin:10px 0}
+  .msg.err{background:var(--errbg);color:var(--err)} .msg.info{background:var(--soft)}
+  .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+</style>
+</head>
+<body>
+<header>
+  <b>Cloud<span>Lead</span> Admin</b>
+  <span class="sp"></span>
+  <input id="token" type="password" placeholder="Admin token" size="28" autocomplete="off">
+  <button class="p" id="load">Load</button>
+  <button id="tick" title="Run the billing and provisioning timers now">Run timers</button>
+</header>
+<main>
+  <div id="msg"></div>
+  <div class="cards" id="cards"></div>
+  <div class="filters" id="filters"></div>
+  <div id="table"></div>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money = (n) => (n == null ? '-' : '$' + Number(n).toFixed(2));
+const when = (v) => (v ? new Date(v).toLocaleString() : '-');
+let orders = [], vendor = null, filter = 'attention', open = new Set();
+
+try { $('#token').value = sessionStorage.getItem('cl_admin') || ''; } catch { /* storage blocked */ }
+
+async function call(path, opts = {}) {
+  const r = await fetch(path, { method: opts.method || 'GET', headers: { 'x-admin-token': $('#token').value, 'Content-Type': 'application/json' }, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `Request failed (${r.status})`);
+  return j;
+}
+const flash = (text, kind = 'err') => { $('#msg').innerHTML = text ? `<div class="msg ${kind}">${esc(text)}</div>` : ''; };
+
+/** Anything a human should look at. */
+function problems(o) {
+  const p = [];
+  if (o.status === 'partial_failure') p.push('Provisioning failed');
+  const b = o.billing;
+  if (b) {
+    if (b.needsAttention) p.push(b.needsAttention);
+    if (b.planError) p.push('Plan change failing: ' + b.planError);
+    if (['past_due', 'suspended', 'terminated'].includes(b.status)) p.push('Billing: ' + b.status.replace('_', ' '));
+    for (const r of b.domainRenewals || []) if (r.status !== 'done') p.push(`Renewal ${r.status}: ${r.domain}${r.error ? ' (' + r.error + ')' : ''}`);
+  }
+  return p;
+}
+
+async function load() {
+  flash('');
+  try {
+    sessionStorage.setItem('cl_admin', $('#token').value);
+  } catch { /* ignore */ }
+  try {
+    [orders, vendor] = await Promise.all([call('/api/admin/orders'), call('/api/admin/vendor').catch((e) => ({ error: e.message }))]);
+    orders.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    render();
+  } catch (e) { flash(e.message); $('#cards').innerHTML = ''; $('#table').innerHTML = ''; }
+}
+
+function render() {
+  const attention = orders.filter((o) => problems(o).length);
+  const count = (f) => orders.filter(f).length;
+  const cap = vendor?.capacity;
+  const cards = [
+    ['Orders', orders.length], ['Needs attention', attention.length, attention.length ? 'bad' : ''],
+    ['Active subscriptions', count((o) => o.billing?.status === 'active')],
+    ['Past due', count((o) => o.billing?.status === 'past_due'), count((o) => o.billing?.status === 'past_due') ? 'bad' : ''],
+    ['First-payment margin', money(orders.reduce((s, o) => s + (o.internalMargin || 0), 0))],
+    ['Vendor', vendor?.error ? 'error' : esc(vendor?.vendor || '-')]
+  ];
+  if (cap?.walletBalanceUsd != null) cards.push(['Vendor wallet', money(cap.walletBalanceUsd)]);
+  for (const [k, v] of Object.entries(cap?.providers || {})) cards.push([`${k} free slots`, v.availableMailboxes ?? '-', (v.availableMailboxes ?? 1) < 10 ? 'bad' : '']);
+  $('#cards').innerHTML = cards.map(([l, n, c]) => `<div class="card ${c || ''}"><div class="n">${typeof n === 'string' && n.startsWith('$') ? esc(n) : esc(n)}</div><div class="l">${esc(l)}</div></div>`).join('');
+
+  const filters = { attention: 'Needs attention', all: 'All orders', past_due: 'Past due', failed: 'Failed' };
+  $('#filters').innerHTML = Object.entries(filters).map(([k, v]) => `<button data-f="${k}" class="${filter === k ? 'on' : ''}">${esc(v)}</button>`).join('');
+  const shown = orders.filter((o) => filter === 'all' ? true : filter === 'attention' ? problems(o).length
+    : filter === 'past_due' ? ['past_due', 'suspended', 'terminated'].includes(o.billing?.status) : o.status === 'partial_failure');
+
+  $('#table').innerHTML = shown.length ? `<table><tr><th>Order</th><th>Created</th><th>Status</th><th>Billing</th><th>Total</th><th>Margin</th><th>Notes</th></tr>
+    ${shown.map((o) => row(o)).join('')}</table>` : '<div class="msg info">Nothing here.</div>';
+  bind();
+}
+
+const tag = (text, kind = '') => `<span class="tag ${kind}">${esc(text)}</span>`;
+function row(o) {
+  const p = problems(o), b = o.billing;
+  const st = tag(o.status, o.status === 'completed' ? 'ok' : o.status === 'partial_failure' ? 'bad' : '');
+  const bs = b ? tag(b.status, b.status === 'active' ? 'ok' : ['past_due', 'suspended', 'terminated'].includes(b.status) ? 'bad' : 'warn') : '<span class="muted">one-time</span>';
+  const r = `<tr class="row" data-o="${esc(o.id)}"><td><b>${esc(o.id)}</b><div class="muted">${esc(o.domains.map((d) => d.name).join(', '))}</div></td><td>${esc(when(o.createdAt))}</td>
+    <td>${st}</td><td>${bs}</td><td>${money(o.quote?.total)}</td><td>${money(o.internalMargin)}</td><td>${p.map((x) => `<div class="err">${esc(x)}</div>`).join('') || '<span class="muted">-</span>'}</td></tr>`;
+  return open.has(o.id) ? r + `<tr><td colspan="7" class="detail">${detail(o)}</td></tr>` : r;
+}
+
+function detail(o) {
+  const b = o.billing;
+  const steps = (o.progress || []).map((p) => `<div><b>${esc(p.domain)}</b><div class="chips">${Object.entries(p.steps).map(([k, s]) =>
+    `<span class="chip ${esc(s.status)}" title="${esc(s.error || s.note || '')}">${esc(k)}${s.attempts > 1 ? ' x' + s.attempts : ''}</span>`).join('')}</div>
+    ${Object.entries(p.steps).filter(([, s]) => s.error).map(([k, s]) => `<pre class="err">${esc(k)}: ${esc(s.error)}</pre>`).join('')}</div>`).join('');
+  const hist = (b?.history || []).slice().reverse().map((h) => `<div class="muted">${esc(when(h.at))} <b>${esc(h.event)}</b> ${esc(h.detail || '')}</div>`).join('');
+  const ren = (b?.domainRenewals || []).map((r) => `<div>cycle ${esc(r.cycle)} ${esc(r.domain)}: ${tag(r.status, r.status === 'done' ? 'ok' : r.status === 'failed' ? 'bad' : 'warn')}${r.error ? ` <span class="err">${esc(r.error)}</span>` : ''}</div>`).join('');
+  const refunds = (o.refunds || []).map((r) => `<div>${money(r.amount)} ${tag(r.status || 'ok')} ${esc(r.reason || '')} <span class="muted">${esc(when(r.at))}</span></div>`).join('');
+  const c = o.contact || {};
+  const sug = o.suggestedRefund;
+  return `<h4>Provisioning</h4>${steps || '-'}
+    ${b ? `<h4>Billing</h4><div>Status ${esc(b.status)}, paid cycles ${esc(b.paidCount)}, next plan <b>${esc(b.plan)}</b>, period ends ${esc(when(b.currentEnd))}${b.graceEndsAt ? ', grace ends ' + esc(when(b.graceEndsAt)) : ''}${b.endsAt ? ', service ends ' + esc(when(b.endsAt)) : ''}</div>
+      ${b.needsAttention ? `<div class="err">${esc(b.needsAttention)}</div>` : ''}${b.planError ? `<pre class="err">${esc(b.planError)}</pre>` : ''}
+      ${ren ? `<h4>Domain renewals</h4>${ren}` : ''}<h4>History</h4>${hist || '-'}` : ''}
+    <h4>Refunds</h4>${refunds || '<span class="muted">none</span>'}${sug && sug.amount > 0 ? `<div class="muted">Suggested: ${money(sug.amount)} (${esc(sug.failedDomains.join(', '))})</div>` : ''}
+    <h4>Customer</h4><div>${esc(c.firstName)} ${esc(c.lastName)}, ${esc(c.company)}, ${esc(c.email)}, ${esc(c.phoneCc ? '+' + c.phoneCc + ' ' + c.phone : '')}</div>
+    <div class="muted">Payment ${esc(o.paymentId || '-')}${b ? ' | subscription ' + esc(b.subscriptionId) : ''}</div>
+    <div class="actions">
+      ${o.status === 'partial_failure' ? `<button class="p" data-act="retry" data-o="${esc(o.id)}">Retry provisioning</button>` : ''}
+      ${o.paymentId && o.status !== 'refunded' ? `<button data-act="refund" data-o="${esc(o.id)}" data-sug="${esc(sug?.amount || 0)}">Refund...</button>` : ''}
+      ${b && ['active', 'past_due'].includes(b.status) ? `<button class="d" data-act="cancel" data-o="${esc(o.id)}">Cancel at period end</button><button class="d" data-act="cancelnow" data-o="${esc(o.id)}">Cancel now</button>` : ''}
+    </div>`;
+}
+
+function bind() {
+  document.querySelectorAll('[data-f]').forEach((b) => b.onclick = () => { filter = b.dataset.f; render(); });
+  document.querySelectorAll('tr.row').forEach((r) => r.onclick = () => { const id = r.dataset.o; open.has(id) ? open.delete(id) : open.add(id); render(); });
+  document.querySelectorAll('[data-act]').forEach((b) => b.onclick = async (e) => {
+    e.stopPropagation();
+    const id = b.dataset.o, act = b.dataset.act;
+    try {
+      if (act === 'retry') await call(`/api/admin/orders/${id}/retry`, { method: 'POST', body: {} });
+      if (act === 'refund') {
+        const amount = prompt('Refund amount (USD)', b.dataset.sug); if (amount === null) return;
+        const reason = prompt('Reason (kept on the order)', ''); if (reason === null) return;
+        await call(`/api/admin/orders/${id}/refund`, { method: 'POST', body: { amount: Number(amount), reason } });
+      }
+      if (act === 'cancel' && confirm('Cancel auto-renewal? Service continues to the end of the paid period.')) await call(`/api/admin/orders/${id}/cancel`, { method: 'POST', body: { atCycleEnd: true } });
+      if (act === 'cancelnow' && confirm('Cancel NOW? Mailboxes are suspended immediately and no refund is issued.')) await call(`/api/admin/orders/${id}/cancel`, { method: 'POST', body: { atCycleEnd: false } });
+      await load();
+    } catch (err) { flash(err.message); }
+  });
+}
+
+$('#load').onclick = load;
+$('#token').addEventListener('keydown', (e) => e.key === 'Enter' && load());
+$('#tick').onclick = async () => { try { await call('/api/admin/billing/tick', { method: 'POST', body: {} }); flash('Timers ran.', 'info'); await load(); } catch (e) { flash(e.message); } };
+if ($('#token').value) load();
+</script>
+</body>
+</html>
