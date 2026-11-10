@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<title>Manage your plan</title>
+<style>
+  :root{--bg:#f7f7fb;--card:#fff;--ink:#1b1b2f;--muted:#5d5d73;--line:#dcdcea;--brand:#6a4df0;--soft:#f0edff;--ok:#16875a;--okbg:#e8f7f0;--err:#c0392b;--errbg:#fdecea}
+  @media (prefers-color-scheme: dark){:root{--bg:#12121c;--card:#1b1b2b;--ink:#ecebf7;--muted:#a3a2bb;--line:#34344d;--soft:#25214a;--okbg:#12301f;--errbg:#3a1a1a;--err:#ff8b7e}}
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  :focus-visible{outline:3px solid var(--brand);outline-offset:2px;border-radius:6px}
+  header{padding:16px 24px;border-bottom:1px solid var(--line);background:var(--card);font-weight:700} header span{color:var(--brand)}
+  main{max-width:760px;margin:0 auto;padding:24px 16px 60px}
+  h1{font-size:22px;margin:0 0 4px} h1:focus{outline:none} h2{font-size:16px;margin:0 0 8px} .sub{color:var(--muted);margin:0 0 16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:16px}
+  input{font:inherit;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);width:100%;min-height:40px}
+  label{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+  button{font:inherit;padding:9px 16px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer;min-height:40px}
+  button.p{background:var(--brand);color:#fff;border-color:var(--brand)} button.d{color:var(--err)} button:disabled{opacity:.5;cursor:not-allowed}
+  .scroll{overflow-x:auto} table{width:100%;border-collapse:collapse} td,th{padding:7px 6px;text-align:left;border-bottom:1px solid var(--line);font-size:14px} th{color:var(--muted);font-weight:500}
+  .tag{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;background:var(--line);color:var(--muted)} .tag.ok{background:var(--okbg);color:var(--ok)} .tag.bad{background:var(--errbg);color:var(--err)}
+  .msg{padding:10px 12px;border-radius:8px;margin:10px 0} .msg.err{background:var(--errbg);color:var(--err)} .msg.info{background:var(--soft)}
+  .warn{color:var(--err)}
+</style>
+</head>
+<body>
+<header>Cloud<span>Lead</span>.ai</header>
+<main id="main" aria-live="polite"></main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money = (n, cur = 'USD') => (cur === 'USD' ? '$' : cur + ' ') + Number(n).toFixed(2);
+const day = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : '-');
+
+// The private link looks like /manage.html#o=<order>&t=<token>. The token is in the fragment, so it is never sent to
+// the server in a URL or written to access logs; it is only sent as a header on the calls below.
+const params = new URLSearchParams(location.hash.slice(1));
+const orderId = params.get('o'), token = params.get('t');
+let state = { order: null, mailboxes: [], receipts: [], credits: [] };
+
+async function call(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: { 'x-manage-token': token || '', 'Content-Type': 'application/json' } });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || 'Request failed');
+  return j;
+}
+
+function lostLink(message) {
+  $('#main').innerHTML = `<h1 id="t" tabindex="-1">Manage your plan</h1><p class="sub">${esc(message || 'Open the private link from your order email, or we can send it again.')}</p>
+    <div class="card"><form id="f"><label for="em">Email address used for your order</label><input id="em" type="email" required autocomplete="email">
+    <p style="margin:12px 0 0"><button class="p" type="submit">Email me my link</button></p></form><div id="out"></div></div>`;
+  $('#t').focus();
+  $('#f').onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const r = await fetch('/api/manage/resend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: $('#em').value }) });
+      const j = await r.json();
+      $('#out').innerHTML = `<div class="msg ${r.ok ? 'info' : 'err'}">${esc(r.ok ? j.message : j.error)}</div>`;
+    } catch { $('#out').innerHTML = '<div class="msg err">Could not send. Please try again.</div>'; }
+  };
+}
+
+function receiptHtml(r, credits) {
+  const s = r.seller || {};
+  return `<!doctype html><meta charset="utf-8"><title>${esc(s.title)} ${esc(r.number)}</title>
+  <style>body{font:14px/1.5 system-ui,Arial,sans-serif;max-width:640px;margin:32px auto;padding:0 16px;color:#111}h1{font-size:22px;margin:0}table{width:100%;border-collapse:collapse;margin:16px 0}td,th{padding:6px 4px;border-bottom:1px solid #ddd;text-align:left}td:last-child,th:last-child{text-align:right}.m{color:#555}@media print{button{display:none}}</style>
+  <button onclick="print()">Print / save as PDF</button>
+  <h1>${esc(s.title || 'Receipt')}</h1><p class="m">${esc(r.number)} · ${esc(day(r.date))}</p>
+  <p><b>${esc(s.name)}</b><br>${esc(s.address)}${s.taxId ? `<br>${esc(s.taxLabel)}: ${esc(s.taxId)}` : ''}</p>
+  <p><b>Billed to</b><br>${esc(r.billTo?.name)}${r.billTo?.company ? `<br>${esc(r.billTo.company)}` : ''}<br>${esc(r.billTo?.email)}</p>
+  <table><tr><th>Description</th><th>Amount</th></tr>${r.items.map((i) => `<tr><td>${esc(i.description)}</td><td>${esc(money(i.amount, r.currency))}</td></tr>`).join('')}
+  <tr><td><b>Total</b></td><td><b>${esc(money(r.total, r.currency))}</b></td></tr></table>
+  ${r.paymentId ? `<p class="m">Payment reference: ${esc(r.paymentId)}</p>` : ''}${s.taxNote ? `<p class="m">${esc(s.taxNote)}</p>` : ''}
+  ${credits.length ? `<p class="m">Credits on this order: ${credits.map((c) => esc(money(c.amount, c.currency))).join(', ')}</p>` : ''}`;
+}
+window.openReceipt = (i) => {
+  const url = URL.createObjectURL(new Blob([receiptHtml(state.receipts[i], state.credits)], { type: 'text/html' }));
+  window.open(url, '_blank', 'noopener');
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+};
+
+function billingText(b) {
+  const out = [];
+  if (!b) return ['One-time purchase: no upcoming charges.'];
+  if (b.status === 'active' && b.nextChargeAt) out.push(`Next charge: <b>${esc(money(b.nextChargeAmount, b.currency))}</b> on ${esc(day(b.nextChargeAt))}. Your plan renews automatically.`);
+  if (b.paymentFailed) out.push(`<span class="warn">Your last payment failed.${b.payBy ? ` Please update your payment method by ${esc(day(b.payBy))} to keep your mailboxes.` : ''} Check your email for the secure link to update your card.</span>`);
+  if (b.status === 'cancelling') out.push(`Auto-renewal is cancelled. Your mailboxes keep working until <b>${esc(day(b.serviceEndsAt))}</b>.`);
+  if (['ended', 'suspended', 'terminated'].includes(b.status)) out.push('This service has ended or is paused.');
+  return out.length ? out : ['No upcoming charges.'];
+}
+
+function render() {
+  const o = state.order, b = o.billing;
+  $('#main').innerHTML = `<h1 id="t" tabindex="-1">Your plan</h1><p class="sub">Order ${esc(o.id)} · keep this page's link private.</p>
+    <div class="card"><h2>Billing</h2><p style="margin:0">${billingText(b).join('<br>')}</p>
+      ${b && b.status === 'active' ? '<p style="margin:12px 0 0"><button class="d" id="cancel" type="button">Cancel auto-renewal</button></p>' : ''}<div id="cmsg"></div></div>
+    <div class="card"><h2>Mailboxes</h2><div class="scroll"><table><tr><th scope="col">Email</th><th scope="col">Provider</th><th scope="col">Status</th></tr>
+      ${state.mailboxes.map((m) => `<tr><td>${esc(m.email)}</td><td>${esc(m.provider)}</td><td><span class="tag ${m.suspended ? 'bad' : 'ok'}">${esc(m.suspended ? 'paused' : 'active')}</span></td></tr>`).join('') || '<tr><td colspan="3">No mailboxes yet.</td></tr>'}</table></div></div>
+    <div class="card"><h2>Receipts</h2><div class="scroll"><table><tr><th scope="col">Date</th><th scope="col">Number</th><th scope="col">Total</th><th scope="col"><span style="position:absolute;left:-999px">Open</span></th></tr>
+      ${state.receipts.map((r, i) => `<tr><td>${esc(day(r.date))}</td><td>${esc(r.number)}</td><td>${esc(money(r.total, r.currency))}</td><td><button type="button" onclick="openReceipt(${i})">View / print</button></td></tr>`).join('')}</table></div></div>`;
+  $('#t').focus();
+  $('#cancel')?.addEventListener('click', async () => {
+    if (!confirm('Cancel auto-renewal? Your mailboxes keep working until the end of the period you have already paid for.')) return;
+    try { state.order.billing = await call(`/api/orders/${orderId}/cancel`, { method: 'POST' }); render(); }
+    catch (e) { $('#cmsg').innerHTML = `<div class="msg err" role="alert">${esc(e.message)}</div>`; }
+  });
+}
+
+(async () => {
+  if (!orderId || !token) return lostLink();
+  try {
+    const [order, mailboxes, rc] = await Promise.all([call(`/api/orders/${encodeURIComponent(orderId)}`), call(`/api/orders/${encodeURIComponent(orderId)}/mailboxes`), call(`/api/orders/${encodeURIComponent(orderId)}/receipts`)]);
+    state = { order, mailboxes, receipts: rc.receipts, credits: rc.credits };
+    render();
+  } catch { lostLink('That link is not valid any more. Enter your email and we will send a new one.'); }
+})();
+</script>
+</body>
+</html>

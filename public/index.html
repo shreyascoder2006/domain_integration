@@ -6,36 +6,39 @@
 <title>CloudLead Infrastructure</title>
 <style>
   :root{
-    --bg:#f7f7fb; --card:#fff; --ink:#1b1b2f; --muted:#6b6b80; --line:#e4e4ee;
+    --bg:#f7f7fb; --card:#fff; --ink:#1b1b2f; --muted:#5d5d73; --line:#dcdcea;
     --brand:#6a4df0; --brand-ink:#fff; --soft:#f0edff; --ok:#16875a; --okbg:#e8f7f0; --err:#c0392b; --errbg:#fdecea;
   }
   @media (prefers-color-scheme: dark){
-    :root{--bg:#12121c;--card:#1b1b2b;--ink:#ecebf7;--muted:#9a99b3;--line:#2e2e45;--soft:#25214a;--okbg:#12301f;--errbg:#3a1a1a;}
+    :root{--bg:#12121c;--card:#1b1b2b;--ink:#ecebf7;--muted:#a3a2bb;--line:#34344d;--soft:#25214a;--okbg:#12301f;--errbg:#3a1a1a;--err:#ff8b7e;}
   }
   *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  :focus-visible{outline:3px solid var(--brand);outline-offset:2px;border-radius:6px}
+  .skip{position:absolute;left:-999px;top:8px;background:var(--brand);color:#fff;padding:8px 12px;border-radius:6px;z-index:10} .skip:focus{left:8px}
   header{padding:16px 24px;border-bottom:1px solid var(--line);background:var(--card);font-weight:700}
   header span{color:var(--brand)}
-  main{max-width:880px;margin:0 auto;padding:24px 16px 120px}
-  .steps{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:24px}
+  main{max-width:880px;margin:0 auto;padding:24px 16px 140px}
+  nav ol.steps{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 24px;padding:0;list-style:none}
   .step{padding:6px 12px;border-radius:999px;background:var(--card);border:1px solid var(--line);color:var(--muted);font-size:13px}
   .step.on{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)} .step.done{color:var(--ok);border-color:var(--ok)}
-  h2{margin:0 0 4px;font-size:20px} .sub{color:var(--muted);margin:0 0 16px}
+  h2{margin:0 0 4px;font-size:20px} h2:focus{outline:none} .sub{color:var(--muted);margin:0 0 16px}
   .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:16px}
-  .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+  .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
   .opt{border:2px solid var(--line);border-radius:10px;padding:14px;cursor:pointer;background:var(--card);text-align:left;color:inherit;font:inherit}
-  .opt.sel{border-color:var(--brand);background:var(--soft)} .opt b{display:block;font-size:16px} .opt small{color:var(--muted)}
+  .opt[aria-pressed=true],.opt.sel{border-color:var(--brand);background:var(--soft)} .opt b{display:block;font-size:16px} .opt small{color:var(--muted)}
   .price{font-size:22px;font-weight:700} .tag{font-size:11px;background:#f5a623;color:#000;border-radius:4px;padding:1px 6px;margin-left:6px}
-  input,select{font:inherit;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);width:100%}
-  input:focus,select:focus{outline:2px solid var(--brand);outline-offset:0}
+  input,select{font:inherit;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);width:100%;min-height:40px}
   label{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
-  .row{display:flex;gap:8px;align-items:end;flex-wrap:wrap} .row>*{flex:1;min-width:140px} .row>button{flex:0 0 auto}
-  button.btn{background:var(--brand);color:var(--brand-ink);border:0;padding:10px 18px;border-radius:8px;font:inherit;font-weight:600;cursor:pointer}
-  button.btn:disabled{opacity:.45;cursor:not-allowed} button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
-  .dom{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);border-radius:8px;padding:10px 12px;cursor:pointer;background:var(--card)}
-  .dom.sel{border-color:var(--ok);background:var(--okbg)} .doms{display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(250px,1fr))}
+  .row{display:flex;gap:8px;align-items:end;flex-wrap:wrap} .row>*{flex:1;min-width:150px} .row>button{flex:0 0 auto}
+  .btn{background:var(--brand);color:var(--brand-ink);border:0;padding:10px 18px;border-radius:8px;font:inherit;font-weight:600;cursor:pointer;min-height:40px}
+  .btn:disabled{opacity:.45;cursor:not-allowed} .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:12px}
+  .seg button{border:0;background:var(--card);color:var(--ink);padding:9px 16px;font:inherit;cursor:pointer} .seg button[aria-pressed=true]{background:var(--brand);color:#fff}
+  .dom{display:flex;justify-content:space-between;align-items:center;gap:8px;border:1px solid var(--line);border-radius:8px;padding:10px 12px;cursor:pointer;background:var(--card);color:inherit;font:inherit;text-align:left;width:100%}
+  .dom[aria-pressed=true]{border-color:var(--ok);background:var(--okbg)} .doms{display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
   .msg{padding:10px 12px;border-radius:8px;margin:10px 0;font-size:14px} .msg.err{background:var(--errbg);color:var(--err)} .msg.info{background:var(--soft)}
-  table{width:100%;border-collapse:collapse} td,th{padding:6px;text-align:left;font-size:14px} th{color:var(--muted);font-weight:500}
-  td input{padding:6px 8px}
+  .scroll{overflow-x:auto} table{width:100%;border-collapse:collapse} td,th{padding:6px;text-align:left;font-size:14px} th{color:var(--muted);font-weight:500}
+  td input{padding:6px 8px;min-width:110px}
   .bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:12px 24px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
   .bar .tot{font-size:14px;color:var(--muted)} .bar .tot b{color:var(--ink);font-size:16px}
   ul.terms{margin:8px 0;padding-left:18px;color:var(--muted);font-size:14px}
@@ -43,13 +46,19 @@
   .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px} .chip{font-size:12px;padding:2px 8px;border-radius:999px;background:var(--line);color:var(--muted)}
   .chip.waiting{background:var(--soft);color:var(--brand);font-style:italic}
   .chip.done{background:var(--okbg);color:var(--ok)} .chip.running{background:var(--soft);color:var(--brand)} .chip.failed{background:var(--errbg);color:var(--err)}
+  @media (max-width:600px){
+    main{padding:16px 12px 170px} .bar{padding:10px 12px} .bar .tot{order:3;width:100%;text-align:center}
+    .card{padding:14px} .row>*{min-width:100%} .row>button{width:100%} .seg{display:flex;width:100%} .seg button{flex:1}
+  }
+  @media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
 </style>
 </head>
 <body>
+<a class="skip" href="#view">Skip to content</a>
 <header>Cloud<span>Lead</span>.ai · Email Infrastructure</header>
 <main>
-  <div class="steps" id="steps"></div>
-  <div id="view"></div>
+  <nav aria-label="Progress"><ol class="steps" id="steps"></ol></nav>
+  <div id="view" aria-live="polite"></div>
 </main>
 <div class="bar" id="bar"></div>
 
@@ -61,10 +70,12 @@ const money = (n) => '$' + Number(n).toFixed(2);
 
 const S = {
   step: 0, cfg: null, provider: 'google', plan: 'quarterly',
-  seed: '', suggestions: [], exact: null, selected: [], forwarding: '',
+  mode: 'manual',                                   // manual: pick domains yourself | quick: choose a mailbox count
+  quick: { count: 20, custom: '', ratio: 4 },
+  seed: '', suggestions: [], exact: null, selected: [], want: 12, forwarding: '',
   persona: { first: '', last: '', perDomain: 4 }, boxes: {},  // boxes[domain] = [{firstName,lastName,emailPrefix}]
   contact: { firstName:'', lastName:'', company:'', email:'', address:'', country:'', state:'', city:'', zip:'', phoneCc:'', phone:'' },
-  terms: false, quote: null, error: '', busy: false, order: null, idem: crypto.randomUUID()
+  terms: false, quote: null, error: '', busy: false, order: null, manageToken: null, idem: crypto.randomUUID(), focusStep: -1
 };
 
 async function api(path, body) {
@@ -77,43 +88,59 @@ const cartPayload = () => ({
   provider: S.provider, plan: S.plan,
   domains: S.selected.map((d) => ({ name: d, mailboxes: S.boxes[d] || [] }))
 });
+const quickCount = () => Math.min(100, Math.max(1, Number(S.quick.custom) || S.quick.count));
+const quickDomains = () => Math.ceil(quickCount() / S.quick.ratio);
 
 function render() {
-  $('#steps').innerHTML = STEPS.map((n, i) => `<div class="step ${i === S.step ? 'on' : i < S.step ? 'done' : ''}">${i + 1}. ${n}</div>`).join('');
-  const v = [viewPlan, viewDomains, viewMailboxes, viewContact, viewReview][S.step];
   if (S.order) return renderProgress();
-  $('#view').innerHTML = v() + (S.error ? `<div class="msg err">${esc(S.error)}</div>` : '');
+  $('#steps').innerHTML = STEPS.map((n, i) => `<li class="step ${i === S.step ? 'on' : i < S.step ? 'done' : ''}" ${i === S.step ? 'aria-current="step"' : ''}>${i + 1}. ${n}${i < S.step ? '<span class="sr" style="position:absolute;left:-999px"> (done)</span>' : ''}</li>`).join('');
+  const v = [viewPlan, viewDomains, viewMailboxes, viewContact, viewReview][S.step];
+  $('#view').setAttribute('aria-busy', S.busy ? 'true' : 'false');
+  $('#view').innerHTML = v() + (S.error ? `<div class="msg err" role="alert">${esc(S.error)}</div>` : '');
   bind();
   renderBar();
+  if (S.focusStep !== S.step) { S.focusStep = S.step; $('#stepTitle')?.focus(); } // announce the new step to screen readers
 }
+const title = (t, sub) => `<h2 id="stepTitle" tabindex="-1">${esc(t)}</h2><p class="sub">${sub}</p>`;
 
 /* ---------- Step 1: plan ---------- */
 function viewPlan() {
   const c = S.cfg;
   const prov = Object.entries(c.providers).map(([k, p]) =>
-    `<button class="opt ${S.provider === k ? 'sel' : ''}" data-provider="${k}"><b>${esc(p.label)}</b><small>${k === 'azure' ? 'Dedicated IP, 50 mailboxes per tenant' : 'Real inboxes, OAuth connected'}</small></button>`).join('');
+    `<button type="button" class="opt" aria-pressed="${S.provider === k}" data-provider="${k}"><b>${esc(p.label)}</b><small>${k === 'azure' ? 'Dedicated IP, 50 mailboxes per tenant' : 'Real inboxes, OAuth connected'}</small></button>`).join('');
   const plans = S.provider === 'azure'
     ? `<div class="opt sel"><b>Quarterly</b><div class="price">$${c.azure.pricePerTenantMonth}<small> / tenant / month</small></div><small>${money(c.azure.pricePerTenantMonth * 3)} per quarter · ${c.azure.mailboxesPerTenant} mailboxes included</small></div>`
     : Object.entries(c.plans).map(([k, p]) =>
-      `<button class="opt ${S.plan === k ? 'sel' : ''}" data-plan="${k}"><b>${esc(p.label)}${k === 'annual_flexi' ? '<span class="tag">Recommended</span>' : ''}</b>
+      `<button type="button" class="opt" aria-pressed="${S.plan === k}" data-plan="${k}"><b>${esc(p.label)}${k === 'annual_flexi' ? '<span class="tag">Recommended</span>' : ''}</b>
        <div class="price">${money(p.pricePerMailboxMonth)}<small> / mailbox / mo</small></div>
        <small>Billed ${p.billingMonths === 12 ? 'annually' : 'every 3 months'} · min ${p.minMailboxes} mailbox${p.minMailboxes > 1 ? 'es' : ''}<br>${esc(p.commitment)}${p.note ? '<br>' + esc(p.note) : ''}</small></button>`).join('');
-  return `<h2>Choose your plan</h2><p class="sub">Pick an email provider and billing term.</p>
-    <div class="card"><div class="grid">${prov}</div></div>
-    <div class="card"><div class="grid">${plans}</div></div>
+  return `${title('Choose your plan', 'Pick an email provider and billing term.')}
+    <div class="card" role="group" aria-label="Email provider"><div class="grid">${prov}</div></div>
+    <div class="card" role="group" aria-label="Billing plan"><div class="grid">${plans}</div></div>
     <div class="msg info">Cold emailing can hurt your main domain. Use lookalike domains (getacme.com instead of acme.com).</div>`;
 }
 
 /* ---------- Step 2: domains ---------- */
 function viewDomains() {
+  const needed = quickDomains();
   const list = S.suggestions.map((d) =>
-    `<div class="dom ${S.selected.includes(d) ? 'sel' : ''}" data-dom="${esc(d)}"><span>${esc(d)}</span><span>${money(S.cfg.domainPricePerYear)}/yr</span></div>`).join('');
+    `<button type="button" class="dom" aria-pressed="${S.selected.includes(d)}" data-dom="${esc(d)}"><span>${esc(d)}</span><span>${money(S.cfg.domainPricePerYear)}/yr</span></button>`).join('');
   const exact = S.exact && !S.exact.available ? `<div class="msg info">${esc(S.exact.domain)} is not available, here are alternatives.</div>` : '';
-  return `<h2>Pick your domains</h2><p class="sub">Recommended: ${S.cfg.recommendedMailboxesPerDomain} mailboxes per domain, .com for best deliverability.</p>
-    <div class="card"><div class="row"><div><label>Your brand or main domain</label><input id="seed" value="${esc(S.seed)}" placeholder="e.g. acme.com"></div>
-    <button class="btn" id="search" ${S.busy ? 'disabled' : ''}>${S.busy ? 'Searching…' : 'Search'}</button></div>${exact}</div>
-    ${S.suggestions.length ? `<div class="card"><label>Suggested domains (${S.selected.length} selected)</label><div class="doms">${list}</div></div>
-    <div class="card"><label>Forwarding domain (optional): your real website that these domains redirect to</label><input id="fwd" value="${esc(S.forwarding)}" placeholder="acme.com"></div>` : ''}`;
+  const quick = S.mode === 'quick' ? `
+    <div class="card"><div class="row">
+      <div><label for="qc">How many mailboxes?</label><select id="qc">${[10, 20, 50, 100].map((n) => `<option value="${n}" ${!S.quick.custom && S.quick.count === n ? 'selected' : ''}>${n}</option>`).join('')}<option value="custom" ${S.quick.custom ? 'selected' : ''}>Custom</option></select></div>
+      <div id="qcWrap" style="${S.quick.custom !== '' ? '' : 'display:none'}"><label for="qcc">Custom count (1-100)</label><input id="qcc" type="number" min="1" max="100" value="${esc(S.quick.custom)}"></div>
+      <div><label for="qr">Mailboxes per domain</label><select id="qr">${[3, 4, 5].map((n) => `<option ${S.quick.ratio === n ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+    </div><p class="sub" style="margin:10px 0 0">That is <b>${needed}</b> domain${needed === 1 ? '' : 's'} (${money(needed * S.cfg.domainPricePerYear)}/yr). We pick the best available ones; you can swap any.</p></div>` : '';
+  return `${title('Pick your domains', `Recommended: ${S.cfg.recommendedMailboxesPerDomain} mailboxes per domain, .com for best deliverability.`)}
+    <div class="seg" role="group" aria-label="How to choose domains"><button type="button" data-mode="manual" aria-pressed="${S.mode === 'manual'}">Choose domains myself</button><button type="button" data-mode="quick" aria-pressed="${S.mode === 'quick'}">Quick setup by mailbox count</button></div>
+    ${quick}
+    <div class="card"><div class="row"><div><label for="seed">Your brand or main domain</label><input id="seed" value="${esc(S.seed)}" placeholder="e.g. acme.com" autocomplete="off"></div>
+    <button type="button" class="btn" id="search" ${S.busy ? 'disabled' : ''}>${S.busy ? 'Searching…' : 'Search'}</button></div>${exact}</div>
+    ${S.suggestions.length ? `<div class="card"><label id="sugLabel">Suggested domains (${S.selected.length} selected${S.mode === 'quick' ? `, ${needed} needed` : ''})</label>
+      <div class="doms" role="group" aria-labelledby="sugLabel">${list}</div>
+      ${S.want < 60 ? `<p style="margin:12px 0 0"><button type="button" class="btn ghost" id="more" ${S.busy ? 'disabled' : ''}>Find more</button></p>` : ''}</div>
+    <div class="card"><label for="fwd">Forwarding domain (optional): your real website that these domains redirect to</label><input id="fwd" value="${esc(S.forwarding)}" placeholder="acme.com" autocomplete="url"></div>` : ''}`;
 }
 
 /* ---------- Step 3: mailboxes ---------- */
@@ -121,59 +148,74 @@ function variants(first, last, n) {
   const f = first.toLowerCase().replace(/[^a-z0-9]/g, ''), l = last.toLowerCase().replace(/[^a-z0-9]/g, '');
   return [`${f}.${l}`, `${l}.${f}`, f, `${f}.${l[0] || ''}`.replace(/\.$/, ''), `${f[0] || ''}.${l}`, `${f}${l[0] || ''}`].filter(Boolean).slice(0, n);
 }
+/** Spread `total` mailboxes over the domains, `perDomain` each, the last domain taking the remainder. */
+function distribute(total, domains, perDomain) {
+  let left = total;
+  return domains.map(() => { const n = Math.min(perDomain, left); left -= n; return n; });
+}
 function generateBoxes() {
   const { first, last, perDomain } = S.persona;
-  for (const d of S.selected) S.boxes[d] = variants(first, last, perDomain).map((p) => ({ firstName: first, lastName: last, emailPrefix: p }));
+  const counts = S.mode === 'quick' ? distribute(quickCount(), S.selected, S.quick.ratio) : S.selected.map(() => perDomain);
+  S.selected.forEach((d, i) => { S.boxes[d] = variants(first, last, counts[i]).map((p) => ({ firstName: first, lastName: last, emailPrefix: p })); });
 }
 function viewMailboxes() {
-  const tables = S.selected.map((d) => `<div class="card"><b>${esc(d)}</b>
-    <table><tr><th>First</th><th>Last</th><th>Email</th><th></th></tr>
-    ${(S.boxes[d] || []).map((m, i) => `<tr><td><input data-d="${esc(d)}" data-i="${i}" data-f="firstName" value="${esc(m.firstName)}"></td>
-      <td><input data-d="${esc(d)}" data-i="${i}" data-f="lastName" value="${esc(m.lastName)}"></td>
-      <td><div class="row" style="flex-wrap:nowrap;gap:4px"><input data-d="${esc(d)}" data-i="${i}" data-f="emailPrefix" value="${esc(m.emailPrefix)}"><span>@${esc(d)}</span></div></td>
-      <td><button class="btn ghost" data-rm="${esc(d)}" data-i="${i}">✕</button></td></tr>`).join('')}</table>
-    <button class="btn ghost" data-add="${esc(d)}" ${(S.boxes[d] || []).length >= S.cfg.maxMailboxesPerDomain ? 'disabled' : ''}>+ Add mailbox</button></div>`).join('');
-  return `<h2>Create mailboxes</h2><p class="sub">Enter a sender name once and we generate the variations for every domain.</p>
-    <div class="card"><div class="row"><div><label>First name</label><input id="pf" value="${esc(S.persona.first)}"></div>
-    <div><label>Last name</label><input id="pl" value="${esc(S.persona.last)}"></div>
-    <div><label>Mailboxes per domain</label><select id="pn">${[1,2,3,4,5].map((n) => `<option ${n === S.persona.perDomain ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
-    <button class="btn" id="gen">Generate</button></div></div>${tables}`;
+  const tables = S.selected.map((d, di) => `<div class="card"><b>${esc(d)}</b>
+    <div class="scroll"><table><tr><th scope="col">First</th><th scope="col">Last</th><th scope="col">Email</th><th scope="col"><span style="position:absolute;left:-999px">Remove</span></th></tr>
+    ${(S.boxes[d] || []).map((m, i) => `<tr><td><input aria-label="First name, mailbox ${i + 1} on ${esc(d)}" data-d="${esc(d)}" data-i="${i}" data-f="firstName" value="${esc(m.firstName)}"></td>
+      <td><input aria-label="Last name, mailbox ${i + 1} on ${esc(d)}" data-d="${esc(d)}" data-i="${i}" data-f="lastName" value="${esc(m.lastName)}"></td>
+      <td><div class="row" style="flex-wrap:nowrap;gap:4px"><input aria-label="Email name, mailbox ${i + 1} on ${esc(d)}" data-d="${esc(d)}" data-i="${i}" data-f="emailPrefix" value="${esc(m.emailPrefix)}" style="min-width:90px"><span>@${esc(d)}</span></div></td>
+      <td><button type="button" class="btn ghost" aria-label="Remove mailbox ${i + 1} on ${esc(d)}" data-rm="${esc(d)}" data-i="${i}">✕</button></td></tr>`).join('')}</table></div>
+    <button type="button" class="btn ghost" data-add="${esc(d)}" ${(S.boxes[d] || []).length >= S.cfg.maxMailboxesPerDomain ? 'disabled' : ''}>+ Add mailbox</button></div>`).join('');
+  const per = S.mode === 'quick'
+    ? `<p class="sub" style="margin:10px 0 0">Quick setup: ${quickCount()} mailboxes across ${S.selected.length} domain${S.selected.length === 1 ? '' : 's'}.</p>`
+    : `<div><label for="pn">Mailboxes per domain</label><select id="pn">${[1,2,3,4,5].map((n) => `<option ${n === S.persona.perDomain ? 'selected' : ''}>${n}</option>`).join('')}</select></div>`;
+  return `${title('Create mailboxes', 'Enter a sender name once and we generate the variations for every domain.')}
+    <div class="card"><div class="row"><div><label for="pf">First name</label><input id="pf" value="${esc(S.persona.first)}" autocomplete="given-name"></div>
+    <div><label for="pl">Last name</label><input id="pl" value="${esc(S.persona.last)}" autocomplete="family-name"></div>${S.mode === 'quick' ? '' : per}
+    <button type="button" class="btn" id="gen">Generate</button></div>${S.mode === 'quick' ? per : ''}</div>${tables}`;
 }
 
 /* ---------- Step 4: contact ---------- */
+const AUTOCOMPLETE = { firstName: 'given-name', lastName: 'family-name', company: 'organization', email: 'email', address: 'street-address', country: 'country', state: 'address-level1', city: 'address-level2', zip: 'postal-code', phoneCc: 'tel-country-code', phone: 'tel-national' };
 function viewContact() {
-  const f = (k, label, span) => `<div style="${span ? 'grid-column:1/-1' : ''}"><label>${label}</label><input data-c="${k}" value="${esc(S.contact[k])}"></div>`;
-  return `<h2>Contact details</h2><p class="sub">Used to register your domains and create the mailboxes.</p>
+  const f = (k, label, span) => `<div style="${span ? 'grid-column:1/-1' : ''}"><label for="c_${k}">${label}</label><input id="c_${k}" data-c="${k}" value="${esc(S.contact[k])}" autocomplete="${AUTOCOMPLETE[k]}" ${k === 'email' ? 'type="email"' : ''}></div>`;
+  return `${title('Contact details', 'Used to register your domains and create the mailboxes.')}
     <div class="card"><div class="grid">${f('firstName','First name')}${f('lastName','Last name')}${f('company','Company')}${f('email','Email')}${f('address','Address',1)}
     ${f('country','Country code (e.g. US, IN)')}${f('state','State / province')}${f('city','City')}${f('zip','ZIP / postal code')}
     ${f('phoneCc','Phone country code (e.g. 1, 91)')}${f('phone','Phone number (digits only)')}</div></div>`;
 }
 
 /* ---------- Step 5: review ---------- */
+function legalLinks() {
+  const l = S.cfg.legal || {};
+  const links = [['terms', 'terms of service'], ['privacy', 'privacy policy'], ['refund', 'refund policy']].filter(([k]) => /^https?:\/\//.test(l[k] || ''))
+    .map(([k, label]) => `<a href="${esc(l[k])}" target="_blank" rel="noopener">${label}</a>`);
+  return links.length ? ` (read the ${links.join(', ')})` : '';
+}
 function viewReview() {
   const q = S.quote;
   if (!q) return `<div class="msg info">Calculating…</div>`;
-  return `<h2>Review &amp; pay</h2><p class="sub">${q.domainCount} domain(s), ${q.mailboxCount} mailbox(es) on ${esc(S.cfg.providers[S.provider].label)}.</p>
-    <div class="card"><table>${q.lines.map((l) => `<tr><td>${esc(l.label)}</td><td style="text-align:right">${money(l.amount)}</td></tr>`).join('')}
-    <tr><td><b>Total due today</b></td><td style="text-align:right"><b>${money(q.total)}</b></td></tr></table>
+  return `${title('Review & pay', `${q.domainCount} domain(s), ${q.mailboxCount} mailbox(es) on ${esc(S.cfg.providers[S.provider].label)}.`)}
+    <div class="card"><div class="scroll"><table>${q.lines.map((l) => `<tr><td>${esc(l.label)}</td><td style="text-align:right">${money(l.amount)}</td></tr>`).join('')}
+    <tr><td><b>Total due today</b></td><td style="text-align:right"><b>${money(q.total)}</b></td></tr></table></div>
     <ul class="terms"><li>Email accounts auto-renew each billing period.</li><li>Mid-term deletions are non-refundable.</li>
     <li>Additional mailboxes cannot be added to an existing domain after purchase.</li>
     <li>Email account credentials are not provided, to prevent multiple logins and avoid IP/mailbox blocking.</li></ul>
-    <label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input type="checkbox" id="terms" style="width:auto" ${S.terms ? 'checked' : ''}> I agree with all the above terms &amp; conditions</label></div>`;
+    <label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input type="checkbox" id="terms" style="width:auto;min-height:auto" ${S.terms ? 'checked' : ''}> <span>I agree with all the above terms &amp; conditions${legalLinks()}</span></label></div>`;
 }
 
 /* ---------- Footer bar + navigation ---------- */
 function renderBar() {
   const q = S.quote, tot = q && S.step >= 2 ? `<b>${S.selected.length}</b> domain(s) · <b>${S.selected.reduce((n, d) => n + (S.boxes[d] || []).length, 0)}</b> mailbox(es) · <b>${money(q.total)}</b> today` : '';
   const last = S.step === 4;
-  $('#bar').innerHTML = `<div>${S.step > 0 ? '<button class="btn ghost" id="back">Back</button>' : ''}</div><div class="tot">${tot}</div>
-    <button class="btn" id="next" ${canNext() ? '' : 'disabled'}>${last ? (S.busy ? 'Processing…' : 'Pay now') : 'Next'}</button>`;
+  $('#bar').innerHTML = `<div>${S.step > 0 ? '<button type="button" class="btn ghost" id="back">Back</button>' : ''}</div><div class="tot" aria-live="polite">${tot}</div>
+    <button type="button" class="btn" id="next" ${canNext() ? '' : 'disabled'}>${last ? (S.busy ? 'Processing…' : 'Pay now') : 'Next'}</button>`;
   $('#back')?.addEventListener('click', () => { S.step--; S.error = ''; render(); });
   $('#next').addEventListener('click', next);
 }
 function canNext() {
   if (S.busy) return false;
-  if (S.step === 1) return S.selected.length > 0;
+  if (S.step === 1) return S.mode === 'quick' ? S.selected.length === quickDomains() : S.selected.length > 0;
   if (S.step === 2) return S.selected.length > 0 && S.selected.every((d) => (S.boxes[d] || []).length > 0);
   if (S.step === 3) return Object.values(S.contact).every((v) => v.trim());
   if (S.step === 4) return S.terms && S.quote;
@@ -235,7 +277,7 @@ async function finishPayment(co, proof) {
       await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
     }
   }
-  $('#view').innerHTML = '<h2>Payment received</h2><p class="sub">We are confirming your payment. This page will update automatically; you will not be charged twice.</p>';
+  $('#view').innerHTML = '<h2 id="stepTitle" tabindex="-1">Payment received</h2><p class="sub">We are confirming your payment. This page will update automatically; you will not be charged twice.</p>';
   for (let i = 0; i < 60; i++) {
     await new Promise((r) => setTimeout(r, 3000));
     try {
@@ -250,12 +292,25 @@ async function finishPayment(co, proof) {
 function bind() {
   document.querySelectorAll('[data-provider]').forEach((b) => b.onclick = () => { S.provider = b.dataset.provider; S.quote = null; render(); });
   document.querySelectorAll('[data-plan]').forEach((b) => b.onclick = () => { S.plan = b.dataset.plan; S.quote = null; render(); });
+  document.querySelectorAll('[data-mode]').forEach((b) => b.onclick = () => { S.mode = b.dataset.mode; S.selected = []; S.boxes = {}; render(); });
+  $('#qc')?.addEventListener('change', (e) => {
+    if (e.target.value === 'custom') { S.quick.custom = String(S.quick.count); } else { S.quick.count = Number(e.target.value); S.quick.custom = ''; }
+    S.selected = []; render();
+  });
+  $('#qcc')?.addEventListener('input', (e) => { S.quick.custom = e.target.value; });
+  $('#qcc')?.addEventListener('change', () => { S.selected = []; render(); });
+  $('#qr')?.addEventListener('change', (e) => { S.quick.ratio = Number(e.target.value); S.selected = []; render(); });
   $('#seed')?.addEventListener('input', (e) => S.seed = e.target.value);
   $('#seed')?.addEventListener('keydown', (e) => e.key === 'Enter' && search());
-  $('#search')?.addEventListener('click', search);
+  $('#search')?.addEventListener('click', () => { S.want = S.mode === 'quick' ? Math.min(60, quickDomains() + 8) : 12; search(); });
+  $('#more')?.addEventListener('click', () => { S.want = Math.min(60, S.want + 12); search(true); });
   $('#fwd')?.addEventListener('input', (e) => S.forwarding = e.target.value);
   document.querySelectorAll('[data-dom]').forEach((el) => el.onclick = () => {
-    const d = el.dataset.dom; S.selected = S.selected.includes(d) ? S.selected.filter((x) => x !== d) : [...S.selected, d]; render();
+    const d = el.dataset.dom;
+    if (S.selected.includes(d)) S.selected = S.selected.filter((x) => x !== d);
+    else if (S.mode !== 'quick' || S.selected.length < quickDomains()) S.selected = [...S.selected, d];
+    else { S.error = `You need ${quickDomains()} domain${quickDomains() === 1 ? '' : 's'} for ${quickCount()} mailboxes: deselect one first.`; }
+    render();
   });
   $('#pf')?.addEventListener('input', (e) => S.persona.first = e.target.value);
   $('#pl')?.addEventListener('input', (e) => S.persona.last = e.target.value);
@@ -265,22 +320,26 @@ function bind() {
     generateBoxes(); render();
   });
   document.querySelectorAll('input[data-f]').forEach((el) => el.addEventListener('input', () => {
-    S.boxes[el.dataset.d][+el.dataset.i][el.dataset.f] = el.value; renderBarOnly();
+    S.boxes[el.dataset.d][+el.dataset.i][el.dataset.f] = el.value; renderBar();
   }));
   document.querySelectorAll('[data-rm]').forEach((b) => b.onclick = () => { S.boxes[b.dataset.rm].splice(+b.dataset.i, 1); render(); });
   document.querySelectorAll('[data-add]').forEach((b) => b.onclick = () => {
     const d = b.dataset.add; S.boxes[d] = S.boxes[d] || []; S.boxes[d].push({ firstName: S.persona.first, lastName: S.persona.last, emailPrefix: '' }); render();
   });
-  document.querySelectorAll('input[data-c]').forEach((el) => el.addEventListener('input', () => { S.contact[el.dataset.c] = el.value; renderBarOnly(); }));
-  $('#terms')?.addEventListener('change', (e) => { S.terms = e.target.checked; renderBarOnly(); });
+  document.querySelectorAll('input[data-c]').forEach((el) => el.addEventListener('input', () => { S.contact[el.dataset.c] = el.value; renderBar(); }));
+  $('#terms')?.addEventListener('change', (e) => { S.terms = e.target.checked; renderBar(); });
 }
-const renderBarOnly = () => renderBar();
 
-async function search() {
+async function search(keepSelection = false) {
   S.error = ''; S.busy = true; render();
   try {
-    const r = await api('/api/domains/suggest?seed=' + encodeURIComponent(S.seed));
-    S.suggestions = r.domains; S.exact = r.exact; S.selected = [];
+    const r = await api(`/api/domains/suggest?seed=${encodeURIComponent(S.seed)}&want=${S.want}`);
+    S.suggestions = r.domains; S.exact = r.exact;
+    S.selected = keepSelection ? S.selected.filter((d) => S.suggestions.includes(d)) : [];
+    if (S.mode === 'quick' && !keepSelection) {
+      S.selected = S.suggestions.slice(0, quickDomains()); // pick the best available automatically
+      if (S.selected.length < quickDomains()) S.error = `Only ${S.selected.length} suitable domains were available. Try "Find more" or another name.`;
+    }
   } catch (e) { S.error = e.message; }
   S.busy = false; render();
 }
@@ -289,15 +348,17 @@ async function search() {
 const LABEL = { register: 'Register domain', nameservers: 'Set up DNS zone', connect_domain: 'Verify domain', mailboxes_ready: 'Mailboxes ready', dns_base: 'SPF / DMARC / MX', mailboxes: 'Create mailboxes', dns_dkim: 'DKIM', connect: 'Connect to sending pool' };
 function renderProgress() {
   const o = S.order;
-  const title = { paid: 'Payment received', provisioning: 'Setting up your infrastructure…', completed: 'All set! Your mailboxes are connected', partial_failure: 'Some items need attention' }[o.status] || o.status;
-  $('#bar').innerHTML = o.status === 'completed' || o.status === 'partial_failure' ? '<div></div><div></div><button class="btn" id="again">Buy more</button>' : '';
+  const heading = { paid: 'Payment received', provisioning: 'Setting up your infrastructure…', completed: 'All set! Your mailboxes are connected', partial_failure: 'Some items need attention' }[o.status] || o.status;
+  $('#bar').innerHTML = o.status === 'completed' || o.status === 'partial_failure' ? '<div></div><div></div><button type="button" class="btn" id="again">Buy more</button>' : '';
   $('#again')?.addEventListener('click', () => location.reload());
   $('#steps').innerHTML = '';
-  $('#view').innerHTML = `<h2>${esc(title)}</h2><p class="sub">Order ${esc(o.id)} · ${money(o.quote.total)} paid. You can leave this page; setup continues.</p>
+  $('#view').removeAttribute('aria-busy');
+  $('#view').innerHTML = `<h2 id="stepTitle" tabindex="-1">${esc(heading)}</h2><p class="sub">Order ${esc(o.id)} · ${money(o.quote.total)} paid. You can leave this page; setup continues${S.manageToken ? '. Save your manage link below.' : '.'}</p>
     <div class="prog">${o.progress.map((p) => `<div class="pd"><b>${esc(p.domain)}</b><div class="chips">
-    ${Object.entries(p.steps).map(([k, s]) => `<span class="chip ${s.status}" title="${esc(s.error || '')}">${esc(LABEL[k])}${s.status === 'failed' ? ' ✕' : s.status === 'done' ? ' ✓' : ''}</span>`).join('')}</div></div>`).join('')}</div>
+    ${Object.entries(p.steps).map(([k, s]) => `<span class="chip ${s.status}" title="${esc(s.error || '')}">${esc(LABEL[k])}${s.status === 'failed' ? ' (failed)' : s.status === 'done' ? ' (done)' : s.status === 'waiting' ? ' (waiting)' : ''}</span>`).join('')}</div></div>`).join('')}</div>
     ${billingBlock(o)}<div id="mbx"></div>`;
   $('#cancelSub')?.addEventListener('click', cancelSubscription);
+  if (S.focusStep !== 'p') { S.focusStep = 'p'; $('#stepTitle')?.focus(); }
   if (o.status === 'completed') loadMailboxes();
 }
 
@@ -312,8 +373,9 @@ function billingBlock(o) {
   if (b.status === 'cancelling') lines.push(`Auto-renewal is cancelled. Your mailboxes keep working until <b>${esc(fmtDate(b.serviceEndsAt))}</b>.`);
   if (['ended', 'suspended', 'terminated'].includes(b.status)) lines.push('This service has ended.');
   const canCancel = b.status === 'active' && S.manageToken;
+  const manage = S.manageToken ? `<p style="margin:10px 0 0"><a href="/manage.html#o=${encodeURIComponent(o.id)}&t=${encodeURIComponent(S.manageToken)}">Manage your plan and download receipts</a> <span class="sub">(bookmark it: it is your private link)</span></p>` : '';
   return `<div class="card" style="margin-top:16px"><b>Billing</b><p class="sub" style="margin:6px 0 0">${lines.join('<br>') || 'No upcoming charges.'}</p>
-    ${canCancel ? '<button class="btn ghost" id="cancelSub" style="margin-top:10px">Cancel auto-renewal</button>' : ''}</div>`;
+    ${canCancel ? '<button type="button" class="btn ghost" id="cancelSub" style="margin-top:10px">Cancel auto-renewal</button>' : ''}${manage}</div>`;
 }
 async function cancelSubscription() {
   if (!confirm('Cancel auto-renewal? Your mailboxes keep working until the end of the period you have already paid for.')) return;
@@ -334,9 +396,12 @@ async function poll() {
   }
 }
 async function loadMailboxes() {
-  const mine = await api(`/api/orders/${S.order.id}/mailboxes`);
-  $('#mbx').innerHTML = `<div class="card" style="margin-top:16px"><b>Connected mailboxes</b><table><tr><th>Email</th><th>Provider</th><th>Warm-up</th></tr>
-    ${mine.map((m) => `<tr><td>${esc(m.email)}</td><td>${esc(m.provider)}</td><td>${esc(m.warmup)}</td></tr>`).join('')}</table></div>`;
+  if (!S.manageToken) return;
+  const r = await fetch(`/api/orders/${S.order.id}/mailboxes`, { headers: { 'x-manage-token': S.manageToken } });
+  if (!r.ok) return;
+  const mine = await r.json();
+  $('#mbx').innerHTML = `<div class="card" style="margin-top:16px"><b>Connected mailboxes</b><div class="scroll"><table><tr><th scope="col">Email</th><th scope="col">Provider</th><th scope="col">Warm-up</th></tr>
+    ${mine.map((m) => `<tr><td>${esc(m.email)}</td><td>${esc(m.provider)}</td><td>${esc(m.warmup)}</td></tr>`).join('')}</table></div></div>`;
 }
 
 (async () => { S.cfg = await api('/api/config'); render(); })();

@@ -146,7 +146,9 @@ const route = {
     maxMailboxesPerDomain: config.maxMailboxesPerDomain,
     plans: config.plans,
     azure: config.azure,
-    providers: config.providers
+    providers: config.providers,
+    // Links shown beside the terms checkbox. Only real https URLs are used; nothing is shown if unset.
+    legal: { terms: process.env.TERMS_URL || '', privacy: process.env.PRIVACY_URL || '', refund: process.env.REFUND_URL || '' }
   }),
 
   'GET /api/domains/suggest': async (req, url) => {

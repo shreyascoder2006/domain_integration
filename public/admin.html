@@ -41,12 +41,14 @@
   <input id="token" type="password" placeholder="Admin token" size="28" autocomplete="off">
   <button class="p" id="load">Load</button>
   <button id="tick" title="Run the billing and provisioning timers now">Run timers</button>
+  <button id="outboxBtn" title="Customer emails: queued, sent, failed">Emails</button>
 </header>
 <main>
   <div id="msg"></div>
   <div class="cards" id="cards"></div>
   <div class="filters" id="filters"></div>
   <div id="table"></div>
+  <div id="outbox" hidden></div>
 </main>
 
 <script>
@@ -67,7 +69,8 @@ async function call(path, opts = {}) {
 const flash = (text, kind = 'err') => { $('#msg').innerHTML = text ? `<div class="msg ${kind}">${esc(text)}</div>` : ''; };
 
 /** Anything a human should look at. */
-function problems(o) {
+const problems = (o) => (o.problems ? o.problems.map((x) => x.message) : localProblems(o)); // the server's list: identical to what alerts report
+function localProblems(o) {
   const p = [];
   if (o.status === 'partial_failure') p.push('Provisioning failed');
   const b = o.billing;
@@ -171,6 +174,17 @@ function bind() {
   });
 }
 
+$('#outboxBtn').onclick = async () => {
+  const box = $('#outbox');
+  if (!box.hidden) { box.hidden = true; return; }
+  try {
+    const d = await call('/api/admin/outbox');
+    const email = (id) => orders.find((o) => o.id === id)?.contact?.email || '';
+    box.innerHTML = `<h4 style="margin:24px 0 8px">Customer emails (${esc(d.mailer)})</h4><table><tr><th>Created</th><th>Type</th><th>To</th><th>Status</th><th>Tries</th><th>Error</th></tr>` +
+      (d.items.map((i) => `<tr><td>${esc(when(i.createdAt))}</td><td>${esc(i.type)}</td><td>${esc(email(i.orderId))}</td><td>${tag(i.status, i.status === 'sent' ? 'ok' : i.status === 'dead' ? 'bad' : 'warn')}</td><td>${esc(i.attempts)}</td><td class="err">${esc(i.error || '')}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">No emails yet.</td></tr>') + '</table>';
+    box.hidden = false;
+  } catch (e) { flash(e.message); }
+};
 $('#load').onclick = load;
 $('#token').addEventListener('keydown', (e) => e.key === 'Enter' && load());
 $('#tick').onclick = async () => { try { await call('/api/admin/billing/tick', { method: 'POST', body: {} }); flash('Timers ran.', 'info'); await load(); } catch (e) { flash(e.message); } };
