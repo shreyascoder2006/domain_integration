@@ -1,35 +1,53 @@
-# CloudLead infra purchase (prototype)
+# CloudLead infra purchase
 
-In-app purchase of domains and mailboxes. Customer picks plan, domains, mailboxes and pays;
-the backend registers domains, sets DNS, creates mailboxes via a vendor and connects them.
-Vendors are hidden from the customer (white-label).
+In-app purchase of domains and mailboxes. A customer picks a plan, domains and mailboxes and pays; the backend registers the
+domains, sets DNS, creates the mailboxes through a vendor, connects them, then keeps the whole thing running: recurring billing,
+yearly domain renewals, failed-payment handling, customer emails, receipts, and a contract for your sending engine.
+Vendors are hidden from the customer (white-label). It uses only Node's standard library (Node 22.5+): nothing to install.
+
+**Status:** complete and tested against simulated vendors and gateways (see "What is verified"). It has **not** been run with
+real accounts yet, and your own database and login still have to be plugged in.
 
 ## Run
 
-    npm start          # http://localhost:3000, mock adapters, no keys needed
-    npm test           # 85 tests: pricing, adapters against simulated accounts (fake HTTP), crypto, refunds, pipeline, payments, billing, operations
+    npm start            # http://localhost:3000, everything mocked, no keys needed
+    npm test             # 153 tests (~1 min): pricing, adapters (fake HTTP), billing lifecycle, chaos, storage contract, ...
 
-Admin dashboard: `/admin.html` (needs `ADMIN_TOKEN`). Orders needing attention come first: failed provisioning, past-due or
-suspended billing, failed domain renewals, plan-change errors. Expand an order for raw errors, billing history and
-renewals; retry provisioning, refund, or cancel from there. It also shows vendor wallet and free mailbox slots.
+Open `/` for the purchase wizard, `/admin.html` (needs `ADMIN_TOKEN`) for operations, `/manage.html#o=...&t=...` for a customer's private page.
+
+## Scripts
+
+| Command | What it does |
+|---|---|
+| `npm run preflight` | Before the first real run: proves every credential and setting works using **read-only** calls |
+| `npm run simulate -- <event> latest [--advance N]` | Drives a subscription through failed payment, grace, suspension and recovery on a running dev server (`DEV_TOOLS=1`) |
+| `npm run backup` / `npm run restore -- <file> --force` | Consistent snapshot (proves it opens, keeps the newest 14) and restore (keeps the previous data) |
+| `npm run rotate-key` | Re-encrypt every stored credential under a new `CREDENTIALS_KEY` (safe to re-run) |
+| `npm run migrate:sqlite -- data/db.json data/db.sqlite` | Move from the JSON file to SQLite (verified copy, source untouched) |
+| `npm run docs:openapi` | Regenerate `docs/openapi.json` from `lib/apiSpec.js` (a test fails if it drifts from `server.js`) |
+
+## Documentation
+
+- [docs/runbook.md](docs/runbook.md): what every "needs attention" item means and what to do; incidents; routine tasks
+- [docs/engine-integration.md](docs/engine-integration.md): how your sending/warm-up engine uses the mailboxes this app creates
+- [docs/adapters.md](docs/adapters.md): writing a new vendor, registrar, gateway, email provider or storage backend
+- [docs/openapi.json](docs/openapi.json): the HTTP API
 
 ## Running it for real
 
-1. Copy `.env.example` to `.env` and fill it in (comments sit on their own lines because Docker's env-file parser
-   would otherwise keep them in the value). Run with `node --env-file=.env server.js`, or `docker build -t cl . && docker run --env-file .env -v cl-data:/app/data -p 3000:3000 cl`.
-2. **Startup refuses unsafe configs.** With `NODE_ENV=production` it will not start with a missing `CREDENTIALS_KEY`,
-   an `ADMIN_TOKEN` under 24 characters, or any `mock` adapter (`ALLOW_MOCKS=1` overrides, for demos). Missing webhook
-   secrets are warnings.
-3. `GET /healthz` returns `{"ok":true}` for load balancers. `SIGTERM`/`SIGINT` stop the server cleanly; anything half-done
-   is resumable, so it is picked up on the next start.
-4. Put it behind HTTPS and set `TRUST_PROXY=1`, otherwise every visitor shares one rate-limit bucket.
-5. **Data**: everything lives in one JSON file (`DATA_FILE`). Writes are atomic (temp file + rename) and the previous
-   copy is kept as `<file>.bak`. If the file is ever unreadable the server **refuses to start** and keeps a copy
-   (`<file>.corrupt-<time>`) instead of starting empty. Back this file up: it holds orders, billing state and encrypted
-   credentials. Replace with a real database when integrating (see "Before going live").
-6. **Protection**: per-IP rate limits (domain search 30/min, checkout 10/min, confirm 30/min, cancel 10/min), 10 wrong
-   admin tokens lock the address out for 15 minutes, security headers on every response, buyers' contact details never
-   appear in the public order view, and the all-mailboxes list is admin-only.
+0. **`npm run preflight`** with your real environment first. It makes only read-only calls (nothing is bought, charged, created or emailed).
+1. Copy `.env.example` to `.env` and fill it in (comments sit on their own lines because Docker's env-file parser would otherwise keep them in the value).
+   Run with `node --env-file=.env server.js`, or `docker build -t cl . && docker run --env-file .env -v cl-data:/app/data -p 3000:3000 cl`.
+2. **Startup refuses unsafe configs.** With `NODE_ENV=production` it will not start with a missing `CREDENTIALS_KEY`, an admin/engine/metrics token under 24 characters,
+   or any `mock` adapter (`ALLOW_MOCKS=1` overrides, for demos). It warns about missing webhook secrets, `NOTIFY_PROVIDER=mock` (customers would get no email) and `PUBLIC_URL`.
+3. `GET /healthz` for load balancers; `GET /metrics` (Prometheus, needs a token) for dashboards. `SIGTERM`/`SIGINT` stop the server cleanly; half-done work resumes on the next start.
+4. Put it behind HTTPS and set `TRUST_PROXY=1`, otherwise every visitor shares one rate-limit bucket. Webhooks need a public HTTPS URL (`PUBLIC_URL`).
+5. **Data**: one JSON file (default) or SQLite (`STORE=sqlite`). Both write through on every change and are covered by the same contract test. JSON writes are atomic with a `.bak` copy; if the file is ever
+   unreadable the server **refuses to start** and keeps a copy instead of starting empty. **Back it up** (`npm run backup`, hourly): it holds orders, billing state and encrypted credentials.
+   One server process per data file.
+6. **Protection**: per-IP rate limits, lockout after 10 wrong admin/engine tokens, security headers, constant-time token checks, secrets redacted from logs, buyers' contact details never in the public order view,
+   mailbox lists and receipts behind the buyer's private token, and an abuse guard (disposable emails, phishing-brand names, per-email and per-network velocity, and a **daily domain cap** that protects your registrar balance).
+7. **Monitoring**: structured JSON logs with request ids; alerts to Slack/email/log when something needs a human (new problem alerts at once, repeats daily, "resolved" is announced).
 
 ## Payment flow (Razorpay)
 
@@ -107,20 +125,21 @@ Customers only ever see generic messages: vendor names, raw errors and costs are
 
 ## Layout
 
-- `lib/config.js` pricing and rules (one place)
-- `lib/pricing.js` quote maths (matches the Saleshandy reference: 3 mailboxes quarterly = $35.91)
-- `lib/domainSuggest.js` prefix/suffix lookalike generator + availability filter
-- `lib/provisioner.js` the pipeline above; vendor credentials are sealed before they are saved
-- `lib/crypto.js` AES-256-GCM sealing (`CREDENTIALS_KEY`)
-- `lib/refunds.js` pro-rata refund suggestion and limits
-- `lib/checkout.js` checkout service: create / confirm / webhook, the only place an order is created
-- `lib/billing.js` subscription schedule maths and the lifecycle (renewals, plan changes, dunning, suspension, cancel)
-- `lib/validate.js` cart and contact validation; `lib/money.js` minor-unit conversion
-- `lib/providers/` adapters: `mock.js`, `namesilo.js`, `cloudflare.js`, `zapmail.js`, `razorpay.js`
-- `lib/errors.js` `PendingError` for "still working, check later"
-- `lib/vendorHooks.js` vendor webhooks: wake waiting steps early (never the source of truth)
-- `lib/ratelimit.js` per-client rate limiter; `lib/startup.js` refuses unsafe configurations
-- `server.js` API; `public/index.html` 5-step wizard + live progress; `public/admin.html` operations dashboard
+- `lib/config.js` pricing and rules (one place); `lib/pricing.js` quote maths; `lib/money.js` minor-unit conversion
+- `lib/validate.js` cart and contact validation; `lib/domainSuggest.js` lookalike generator + availability filter
+- `lib/checkout.js` create / confirm / webhook: the only place an order is created
+- `lib/provisioner.js` the pipeline above (idempotent, resumable, crash-safe); `lib/vendorHooks.js` vendor webhooks wake waiting steps early
+- `lib/billing.js` subscription schedule maths and lifecycle (renewals, plan changes, dunning, suspension, cancel)
+- `lib/notify.js` + `lib/templates.js` + `lib/mailers.js` customer email: outbox with de-duplication and retries
+- `lib/alerts.js` + `lib/problems.js` "needs a human" detection and Slack/email/log alerts
+- `lib/engine.js` the contract with your sending engine; `lib/receipts.js` per-cycle receipts
+- `lib/store.js` the storage seam (`BaseStore`, JSON backend); `lib/store/sqlite.js` SQLite backend
+- `lib/abuse.js`, `lib/ratelimit.js`, `lib/startup.js` abuse guard, rate limits, refuse-to-boot checks
+- `lib/log.js` structured logging with redaction; `lib/metrics.js` Prometheus text
+- `lib/crypto.js` + `lib/rotate.js` AES-256-GCM sealing and key rotation; `lib/backup.js` backup, restore, migration
+- `lib/preflight.js` read-only credential checks; `lib/apiSpec.js` the OpenAPI source
+- `lib/providers/` adapters: `mock.js`, `namesilo.js`, `cloudflare.js`, `zapmail.js`, `razorpay.js`; `lib/errors.js` `PendingError`
+- `server.js` HTTP API and timers; `public/` the wizard (`index.html`), `manage.html`, `admin.html`; `scripts/` the CLI tools
 
 ## Configuration (env)
 
@@ -152,32 +171,49 @@ Customers only ever see generic messages: vendor names, raw errors and costs are
 | `CREDENTIALS_KEY` | 32 random bytes, base64. **Required when `NODE_ENV=production`** |
 | `ADMIN_TOKEN` | enables the admin API (sent as `x-admin-token`); admin is disabled if unset |
 | `PORT`, `DATA_FILE`, `MOCK_DELAY_MS`, `MOCK_FAIL=registrar\|vendor` | server and mock controls |
+| `STORE`, `SQLITE_FILE` | `json` (default, `DATA_FILE`) or `sqlite` |
+| `PUBLIC_URL` | this server's public https address: used in emails, alerts and the preflight |
+| `NOTIFY_PROVIDER`, `RESEND_API_KEY`, `NOTIFY_FROM` | customer email: `mock` (default, nothing sent) or `resend` |
+| `ALERT_SLACK_WEBHOOK`, `ALERT_EMAIL`, `ALERT_MIN_SLOTS`, `ALERT_MIN_WALLET` | where "needs attention" alerts go, and the vendor capacity thresholds |
+| `ENGINE_TOKEN`, `METRICS_TOKEN` | enable `/api/engine/*` and `/metrics` (24+ chars in production) |
+| `INVOICE_*`, `TERMS_URL`, `PRIVACY_URL`, `REFUND_URL` | receipt seller details; links shown beside the terms checkbox |
+| `DAILY_DOMAIN_CAP`, `MAX_DOMAINS_PER_ORDER`, `ABUSE_*` | abuse and spend protection |
+| `LOG_LEVEL`, `LOG_FORMAT` | logging |
+| `DEV_TOOLS`, `MOCK_WEBHOOK_SECRET` | demo only: billing clock + simulator (never honoured in production) |
+| `WAIT_TIMEOUT_CONNECT_MS` | give up on domain verification after this long (default 20 h, below the vendor's 24 h limit) |
+
 
 Generate a credentials key: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`
 
 ## API
 
-    GET  /api/config
-    GET  /api/domains/suggest?seed=acme
-    POST /api/quote
-    POST /api/checkout          (idempotencyKey supported; server-side price; returns the gateway order for the popup)
-    POST /api/checkout/:id/confirm   ({paymentId, signature}; idempotent, creates the order)
-    GET  /api/checkout/:id           (status, and the order once a webhook has created it)
-    POST /api/webhooks/razorpay      (raw body + X-Razorpay-Signature)
-    POST /api/webhooks/zapmail       (raw body + X-Zapmail-Signature; only wakes waiting steps)
-    GET  /api/orders/:id             (includes a safe billing summary: next charge, payment failed, service end)
-    GET  /api/orders/:id/mailboxes   (that order's mailboxes; credentials never returned; suspended ones have status "suspended")
-    POST /api/orders/:id/cancel      (x-manage-token; cancels at the end of the paid period)
-    GET  /healthz
+Full reference: [docs/openapi.json](docs/openapi.json).
 
-    # admin (x-admin-token)
-    GET  /api/admin/orders                 (adds internal margin, contact, raw step errors, full billing state + history, refunds, suggested refund)
-    GET  /api/admin/mailboxes              (all mailboxes)
-    POST /api/admin/orders/:id/retry       (resume a partially failed order)
-    POST /api/admin/orders/:id/cancel      ({atCycleEnd?: true})
-    POST /api/admin/billing/tick           (run the billing timer now)
-    POST /api/admin/orders/:id/refund      ({amount?, reason?}; defaults to the suggested pro-rata amount)
-    GET  /api/admin/vendor                 (vendor wallet balance and free mailbox slots)
+    # customers
+    GET  /api/config  /api/domains/suggest?seed=&want=  POST /api/quote
+    POST /api/checkout                         server-side price; creates the gateway payment (idempotencyKey supported)
+    POST /api/checkout/:id/confirm             {paymentId, signature}: verifies with the gateway, creates the order (idempotent)
+    GET  /api/checkout/:id                     status, and the order once a webhook created it
+    GET  /api/orders/:id                       progress + a safe billing summary
+    GET  /api/orders/:id/mailboxes|receipts    x-manage-token
+    POST /api/orders/:id/cancel                x-manage-token: cancel at the end of the paid period
+    POST /api/manage/resend                    {email}: email me my link (identical answer whether or not the address has an order)
+
+    # gateways and vendors
+    POST /api/webhooks/razorpay                raw body + X-Razorpay-Signature
+    POST /api/webhooks/zapmail                 raw body + X-Zapmail-Signature (only wakes waiting steps)
+
+    # your sending engine (x-engine-token = ENGINE_TOKEN)
+    GET  /api/engine/mailboxes?sendable=1      what may send right now
+    GET  /api/engine/mailboxes/:id/credentials decrypted login; 409 while suspended
+    POST /api/engine/mailboxes/:id/state       {warmup, note}
+
+    # operations
+    GET  /healthz     GET /metrics (Bearer METRICS_TOKEN)
+    GET  /api/admin/orders|mailboxes|outbox|vendor            x-admin-token
+    POST /api/admin/orders/:id/retry|cancel|refund            ({amount?, reason?} defaults to the suggested pro-rata refund)
+    POST /api/admin/billing/tick                              run the billing, email and alert timers now
+    POST /api/admin/dev/advance                               demo only (DEV_TOOLS=1)
 
 ## Verification status of the real adapters
 
@@ -245,21 +281,28 @@ Generate a credentials key: `node -e "console.log(require('crypto').randomBytes(
 6. Mailbox creation fails for domains older than 24 h in their system: a connection that sits waiting for
    nameserver propagation for a day may need a manual fix.
 
-## Before going live (not done yet)
+## What is verified, and what is not
 
-- A second mailbox vendor (Infraforge / Maildoso) as a fallback.
-- A payment that lands after the customer left is still honoured (the webhook creates the order), and if a domain was
-  taken meanwhile the order ends as `partial_failure` for an admin refund. Unpaid checkouts are purged after 14 days.
-- **Replace the JSON store and the hard-coded `demo-user` with CloudLead's database and auth.** The JSON file is rewritten
-  in full on every change (fine for a prototype, not for load) and only one server process may use it. `lib/store.js` is
-  the single seam: keep its methods, swap the storage. Rate-limit counters are also per process (use Redis if you scale out).
-- Mailbox removal is only scheduled for the vendor's next renewal (Zapmail has no immediate delete, and the docs do
-  not say whether the slot returns). The vendor's own subscription renewal is outside this app: keep their wallet funded.
-- The sending/warm-up engine must honour `suspended: true` on mailboxes, otherwise suspension has no effect.
-- Customers cannot change payment method, upgrade, or add mailboxes yet (the gateway's hosted page handles card changes
-  for failed charges; adding mailboxes to an existing domain is blocked by the terms).
-- Customer cancellation uses a one-time manage token because this prototype has no accounts. Replace with real auth.
-- No Content-Security-Policy yet: Razorpay's checkout loads scripts and frames from several of its own domains, and a
-  wrong policy would silently break payment. Add one once the popup can be tested with real test keys.
-- Abuse beyond rate limits (disposable emails, card-testing, domain-name abuse reports) is not handled.
-- Quick retries back off 1 s, 2 s, 3 s; anything slower is a `waiting` step that the timer re-checks (e.g. NameSilo 268 "retry later" is a hard error today: treat as pending if it shows up in practice).
+**Verified here** (by the test suite, the chaos tests and end-to-end runs through the real server and browser): pricing and the billing schedule, the whole
+purchase flow, crash recovery at every save point, webhook handling (including fuzzing), the dunning lifecycle, emails, alerts, the engine contract, receipts, backups,
+key rotation, both storage backends, accessibility properties of the wizard, rate limits and lockouts.
+
+**Not verified** because it needs real accounts: every call to NameSilo, Cloudflare, Zapmail, Razorpay and the email provider (shapes come from their docs; see above and
+the open questions), the Razorpay checkout popup, the Docker image, and the CI workflow. `npm run preflight` is the first thing to run once you have keys.
+
+## Before going live
+
+1. Answers to the open vendor questions above, and `npm run preflight` passing with real keys.
+2. **Plug in your database and login.** `lib/store.js` is the seam (`docs/adapters.md`); the contract test proves a new backend. Replace the hard-coded `demo-user` and the one-time manage token with real accounts.
+3. Make your sending engine follow `docs/engine-integration.md` (most importantly: skip mailboxes with `sendable: false`).
+4. Legal text and links (`TERMS_URL`, `PRIVACY_URL`, `REFUND_URL`), receipt/tax details (`INVOICE_*`), and a real email provider (`NOTIFY_PROVIDER`).
+5. A second mailbox vendor as a fallback (Infraforge / Maildoso), once you know their terms.
+
+### Known limits
+
+- One server process per data file; rate-limit counters are per process (use Redis if you scale out).
+- Mailbox removal happens at the vendor's next renewal (no immediate delete); the vendor's own subscription and wallet are outside this app: keep them funded.
+- Manage links cannot be revoked individually. Customers cannot change payment method or upgrade in-app (the gateway's hosted page handles card changes for failed charges); adding mailboxes to an existing domain is blocked by the terms.
+- A payment that lands after the customer left is still honoured; if a domain was taken meanwhile the order ends as `partial_failure` for an admin refund. Unpaid checkouts are purged after 14 days.
+- No Content-Security-Policy: Razorpay's checkout loads scripts and frames from several of its own domains, and a wrong policy would silently break payment. Add one once the popup can be tested with real test keys.
+- The brand-abuse list matches substrings and will catch a few legitimate names: use `ABUSE_ALLOW_DOMAINS`. Card-testing and chargeback fraud need the gateway's own tools.

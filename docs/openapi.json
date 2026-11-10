@@ -1,0 +1,1934 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "CloudLead infrastructure purchase API",
+    "version": "1.0.0",
+    "description": "Buy domains and mailboxes inside CloudLead. Prices are always computed on the server. Errors are `{ \"error\": \"message\" }`; only customer-safe messages are ever returned, everything else is a generic 500."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "manageToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-manage-token",
+        "description": "Returned once to the buyer when the order is created, and in their emails. Proves they own the order."
+      },
+      "adminToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-admin-token",
+        "description": "ADMIN_TOKEN. 10 wrong attempts lock the address out for 15 minutes."
+      },
+      "engineToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-engine-token",
+        "description": "ENGINE_TOKEN, for the sending/warm-up engine."
+      },
+      "metricsBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "METRICS_TOKEN (or ADMIN_TOKEN when METRICS_TOKEN is unset)."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "MailboxRequest": {
+        "type": "object",
+        "required": [
+          "firstName",
+          "lastName",
+          "emailPrefix"
+        ],
+        "properties": {
+          "firstName": {
+            "type": "string"
+          },
+          "lastName": {
+            "type": "string"
+          },
+          "emailPrefix": {
+            "type": "string",
+            "description": "Letters, digits, . _ - ; no consecutive separators"
+          }
+        }
+      },
+      "Cart": {
+        "type": "object",
+        "required": [
+          "provider",
+          "domains"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "google",
+              "microsoft",
+              "azure"
+            ]
+          },
+          "plan": {
+            "type": "string",
+            "enum": [
+              "quarterly",
+              "annual_flexi",
+              "annual_fixed"
+            ],
+            "description": "Ignored for azure"
+          },
+          "domains": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "mailboxes"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "example": "getacme.com"
+                },
+                "mailboxes": {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 5,
+                  "items": {
+                    "$ref": "#/components/schemas/MailboxRequest"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "Contact": {
+        "type": "object",
+        "required": [
+          "firstName",
+          "lastName",
+          "company",
+          "address",
+          "country",
+          "state",
+          "city",
+          "zip",
+          "phoneCc",
+          "phone",
+          "email"
+        ],
+        "properties": {
+          "firstName": {
+            "type": "string"
+          },
+          "lastName": {
+            "type": "string"
+          },
+          "company": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string",
+            "description": "ISO 3166 alpha-2",
+            "example": "IN"
+          },
+          "state": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "zip": {
+            "type": "string"
+          },
+          "phoneCc": {
+            "type": "string",
+            "example": "91"
+          },
+          "phone": {
+            "type": "string",
+            "description": "Digits only"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          }
+        }
+      },
+      "CheckoutRequest": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Cart"
+          },
+          {
+            "type": "object",
+            "required": [
+              "contact",
+              "acceptedTerms"
+            ],
+            "properties": {
+              "contact": {
+                "$ref": "#/components/schemas/Contact"
+              },
+              "acceptedTerms": {
+                "type": "boolean"
+              },
+              "forwardingDomain": {
+                "type": "string"
+              },
+              "idempotencyKey": {
+                "type": "string",
+                "description": "The same key returns the same checkout"
+              }
+            }
+          }
+        ]
+      },
+      "Quote": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "domainCount": {
+            "type": "integer"
+          },
+          "mailboxCount": {
+            "type": "integer"
+          },
+          "billingMonths": {
+            "type": "integer"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "amount": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "total": {
+            "type": "number"
+          }
+        }
+      },
+      "PaymentSession": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "razorpay",
+              "mock"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "subscription",
+              "order"
+            ]
+          },
+          "orderId": {
+            "type": "string"
+          },
+          "subscriptionId": {
+            "type": "string"
+          },
+          "amountMinor": {
+            "type": "integer"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "client": {
+            "type": "object",
+            "description": "Public options for the gateway checkout widget (never secrets)"
+          }
+        }
+      },
+      "BillingSummary": {
+        "type": "object",
+        "nullable": true,
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "past_due",
+              "suspended",
+              "terminated",
+              "cancelling",
+              "ended"
+            ]
+          },
+          "periodMonths": {
+            "type": "integer"
+          },
+          "nextChargeAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "nextChargeAmount": {
+            "type": "number",
+            "nullable": true
+          },
+          "currency": {
+            "type": "string"
+          },
+          "cancelAtPeriodEnd": {
+            "type": "boolean"
+          },
+          "serviceEndsAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "paymentFailed": {
+            "type": "boolean"
+          },
+          "payBy": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "Order": {
+        "type": "object",
+        "description": "Provisioning progress per domain plus a safe billing summary. Never includes contact details, credentials, margins or vendor names.",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "paid",
+              "provisioning",
+              "completed",
+              "partial_failure",
+              "refunded"
+            ]
+          },
+          "quote": {
+            "$ref": "#/components/schemas/Quote"
+          },
+          "progress": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "billing": {
+            "$ref": "#/components/schemas/BillingSummary"
+          }
+        }
+      },
+      "Mailbox": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "suspended": {
+            "type": "boolean"
+          },
+          "warmup": {
+            "type": "string"
+          },
+          "orderId": {
+            "type": "string"
+          }
+        }
+      },
+      "EngineMailbox": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "orderId": {
+            "type": "string"
+          },
+          "userId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "sendable": {
+            "type": "boolean",
+            "description": "Send ONLY from mailboxes where this is true; re-check before every run"
+          },
+          "suspended": {
+            "type": "boolean"
+          },
+          "suspendedReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "warmup": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "warming",
+              "ready",
+              "paused",
+              "error"
+            ]
+          },
+          "smtp": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "host": {
+                "type": "string"
+              },
+              "port": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "Receipt": {
+        "type": "object",
+        "properties": {
+          "number": {
+            "type": "string"
+          },
+          "cycle": {
+            "type": "integer"
+          },
+          "date": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "amount": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "total": {
+            "type": "number"
+          },
+          "paymentId": {
+            "type": "string",
+            "nullable": true
+          },
+          "billTo": {
+            "type": "object"
+          },
+          "seller": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Liveness check",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Prometheus metrics",
+        "security": [
+          {
+            "metricsBearer": []
+          },
+          {
+            "adminToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Prometheus text format",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/config": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Plans, prices and legal links for the wizard",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/domains/suggest": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Lookalike domain suggestions that are available to register",
+        "parameters": [
+          {
+            "name": "seed",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "want",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60,
+              "default": 12
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "seed": {
+                      "type": "string"
+                    },
+                    "exact": {
+                      "type": "object"
+                    },
+                    "pricePerYear": {
+                      "type": "number"
+                    },
+                    "domains": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (see Retry-After)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/quote": {
+      "post": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Price a cart (the server is always the source of truth)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Cart"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Quote"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (see Retry-After)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/checkout": {
+      "post": {
+        "tags": [
+          "payment"
+        ],
+        "summary": "Validate, price on the server and start a payment",
+        "description": "Checks availability and vendor capacity first, so the customer is never charged for something we cannot deliver.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "checkoutId": {
+                      "type": "string"
+                    },
+                    "quote": {
+                      "$ref": "#/components/schemas/Quote"
+                    },
+                    "payment": {
+                      "$ref": "#/components/schemas/PaymentSession"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or abuse rule",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Domain no longer available",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited / too many checkouts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Gateway could not start the payment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Out of capacity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/checkout/{id}": {
+      "get": {
+        "tags": [
+          "payment"
+        ],
+        "summary": "Checkout status (and the order once a webhook created it)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    },
+                    "order": {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/Order"
+                        }
+                      ],
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown checkout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/checkout/{id}/confirm": {
+      "post": {
+        "tags": [
+          "payment"
+        ],
+        "summary": "The browser reports payment; the server verifies it with the gateway and creates the order",
+        "description": "Idempotent. The response includes `manageToken` once: store it, it is the buyer's key to manage the order.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "paymentId": {
+                    "type": "string"
+                  },
+                  "signature": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Verification failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment not completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Payment does not match, or still being confirmed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Gateway lookup failed: retry",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/webhooks/razorpay": {
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Payment gateway webhook (raw body, X-Razorpay-Signature)",
+        "description": "Creates orders if the browser never confirmed, and drives the subscription lifecycle. De-duplicated by X-Razorpay-Event-Id.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "handled": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/webhooks/zapmail": {
+      "post": {
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Mailbox vendor webhook (raw body, X-Zapmail-Signature)",
+        "description": "Only wakes waiting pipeline steps sooner; never marks work done.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Vendor has no webhooks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/orders/{id}": {
+      "get": {
+        "tags": [
+          "orders"
+        ],
+        "summary": "Provisioning progress and a safe billing summary",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/orders/{id}/mailboxes": {
+      "get": {
+        "tags": [
+          "orders"
+        ],
+        "summary": "The order's mailboxes (credentials are never returned)",
+        "security": [
+          {
+            "manageToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Mailbox"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Wrong token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/orders/{id}/receipts": {
+      "get": {
+        "tags": [
+          "orders"
+        ],
+        "summary": "One receipt per paid billing cycle, plus credits for refunds",
+        "security": [
+          {
+            "manageToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "receipts": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Receipt"
+                      }
+                    },
+                    "credits": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Wrong token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/orders/{id}/cancel": {
+      "post": {
+        "tags": [
+          "orders"
+        ],
+        "summary": "Cancel auto-renewal at the end of the paid period",
+        "security": [
+          {
+            "manageToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingSummary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Wrong token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already cancelled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Gateway could not cancel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/manage/resend": {
+      "post": {
+        "tags": [
+          "orders"
+        ],
+        "summary": "Email me my manage link",
+        "description": "Always answers the same, whether or not the address has an order. 5 per hour per address.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email"
+                ],
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/engine/mailboxes": {
+      "get": {
+        "tags": [
+          "engine"
+        ],
+        "summary": "Mailboxes the engine may use",
+        "security": [
+          {
+            "engineToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "sendable",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "1"
+              ]
+            }
+          },
+          {
+            "name": "orderId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EngineMailbox"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/engine/mailboxes/{id}/credentials": {
+      "get": {
+        "tags": [
+          "engine"
+        ],
+        "summary": "Decrypted login for ONE mailbox. Refused (409) while the mailbox is suspended",
+        "security": [
+          {
+            "engineToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string"
+                    },
+                    "smtp": {
+                      "type": "object",
+                      "nullable": true
+                    },
+                    "credentials": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown mailbox",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Suspended or no credentials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/engine/mailboxes/{id}/state": {
+      "post": {
+        "tags": [
+          "engine"
+        ],
+        "summary": "The engine reports warm-up progress",
+        "security": [
+          {
+            "engineToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "warmup": {
+                    "type": "string",
+                    "enum": [
+                      "queued",
+                      "warming",
+                      "ready",
+                      "paused",
+                      "error"
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineMailbox"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown mailbox",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/orders": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "All orders with margins, contact, raw errors, full billing state and problems",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/mailboxes": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "All mailboxes (credentials never returned)",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Mailbox"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/outbox": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Customer email queue (latest 200)",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/vendor": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Mailbox vendor wallet and free slots",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/orders/{id}/retry": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Resume a partially failed order",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not in partial_failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/orders/{id}/cancel": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Cancel a subscription",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "atCycleEnd": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingSummary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/orders/{id}/refund": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Refund through the gateway (idempotent per amount)",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "type": "number"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Exceeds refundable amount",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Gateway rejected the refund",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/billing/tick": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Run the billing, email and alert timers now",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/dev/advance": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "DEMO ONLY (DEV_TOOLS=1, never in production): move the billing clock forward",
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "days": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not enabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

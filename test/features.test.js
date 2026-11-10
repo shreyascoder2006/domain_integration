@@ -213,3 +213,41 @@ test('mock gateway webhooks use the same HMAC scheme as Razorpay', () => {
   assert.equal(ev.subscription.id, 'sub_1');
   assert.throws(() => mockPayments.verifyWebhook(raw, { 'x-razorpay-signature': 'bad' }), (e) => e.status === 400);
 });
+
+/* ---------------- Replay protection and keyed IP hashing ---------------- */
+import { createCheckoutService } from '../lib/checkout.js';
+import { createHash } from 'node:crypto';
+import { mockRegistrar, mockDns, mockMailboxVendor } from '../lib/providers/mock.js';
+
+test('webhooks: an old signed event cannot be replayed to suspend a paying customer', async () => {
+  const store = newStore();
+  const svc = createCheckoutService({ store, providers: { registrar: mockRegistrar, dns: mockDns, vendor: mockMailboxVendor, payments: mockPayments }, log: { error() {}, warn() {}, info() {} } });
+  const checkoutBody = { provider: 'google', plan: 'quarterly', acceptedTerms: true,
+    contact: { firstName: 'A', lastName: 'B', company: 'C', email: 'a@acme.co', address: '1', country: 'IN', state: 'MH', city: 'N', zip: '1', phoneCc: '91', phone: '9800000000' },
+    domains: [{ name: 'getreplaytest9.com', mailboxes: [{ firstName: 'A', lastName: 'B', emailPrefix: 'a' }] }] };
+  let co;
+  for (const name of ['getreplaytest9.com', 'getreplaytest8.com', 'getreplaytest7.com', 'getreplaytest6.com']) {
+    try { co = await svc.create({ ...checkoutBody, domains: [{ ...checkoutBody.domains[0], name }] }); break; } catch { /* mock marks ~1 in 5 names taken */ }
+  }
+  const order = await svc.confirm(co.checkoutId, { paymentId: 'pay_mock_replay' });
+  const o = store.getOrder(order.id);
+  const send = (event, createdAt) => {
+    const raw = Buffer.from(JSON.stringify({ event, created_at: createdAt, payload: { subscription: { entity: { id: o.billing.subscriptionId, paid_count: 1 } } } }));
+    return svc.handleWebhook(raw, { 'x-razorpay-signature': createHmac('sha256', 'mock-webhook-secret').update(raw).digest('hex') });
+  };
+  const nowSec = Math.floor(Date.now() / 1000);
+  assert.deepEqual(send('subscription.halted', nowSec - 3 * 86_400), { handled: false, reason: 'stale' });
+  assert.equal(o.billing.status, 'active', 'the replayed event changed nothing');
+  assert.equal(send('subscription.halted', nowSec - 600).handled, true, 'a fresh event is processed normally');
+  assert.equal(o.billing.status, 'past_due');
+  assert.equal(send('subscription.pending', null).handled, true, 'events without a timestamp are still handled (the event id de-duplicates them)');
+});
+
+test('abuse: IP hashes are keyed, so they cannot be reversed by hashing every IPv4 address', () => {
+  const store = newStore();
+  const a = createAbuseGuard({ store, env: { ABUSE_SALT: 'salt-a' } }).ipHash('1.2.3.4');
+  const b = createAbuseGuard({ store, env: { ABUSE_SALT: 'salt-b' } }).ipHash('1.2.3.4');
+  assert.notEqual(a, b);
+  assert.notEqual(a, createHash('sha256').update('1.2.3.4').digest('hex').slice(0, 24), 'not a bare SHA-256');
+  assert.equal(a, createAbuseGuard({ store, env: { ABUSE_SALT: 'salt-a' } }).ipHash('1.2.3.4'), 'stable for the same key');
+});

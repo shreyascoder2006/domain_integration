@@ -5,6 +5,7 @@ ENV NODE_ENV=production PORT=3000 DATA_FILE=/app/data/db.json
 COPY package.json ./
 COPY lib ./lib
 COPY public ./public
+COPY scripts ./scripts
 COPY server.js ./
 # The data directory must be a persistent volume: orders, billing state and encrypted credentials live there.
 RUN mkdir -p /app/data && chown -R node:node /app

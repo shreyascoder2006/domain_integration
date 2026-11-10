@@ -24,6 +24,7 @@ import { createEngineApi } from './lib/engine.js';
 import { buildReceipts, sellerFromEnv } from './lib/receipts.js';
 import { createAbuseGuard } from './lib/abuse.js';
 import { createHttpCounters, renderMetrics } from './lib/metrics.js';
+import { PendingError } from './lib/errors.js';
 
 // ---- Refuse to boot in a configuration that would lose money or data ----
 const env = checkEnv();
@@ -109,8 +110,9 @@ const send = (res, status, body, extra = {}) => {
 };
 const readRaw = (req) => new Promise((resolve, reject) => {
   const chunks = [];
-  let size = 0;
-  req.on('data', (c) => { size += c.length; if (size > 1e6) { reject(httpError(413, 'Body too large')); req.destroy(); } else chunks.push(c); });
+  let size = 0, tooBig = false;
+  // Stop buffering at the limit but let the 413 reply go out before the socket is closed (see the error handler).
+  req.on('data', (c) => { if (tooBig) return; size += c.length; if (size > 1e6) { tooBig = true; chunks.length = 0; reject(httpError(413, 'Body too large')); } else chunks.push(c); });
   req.on('end', () => resolve(Buffer.concat(chunks)));
   req.on('error', reject);
 });
@@ -346,7 +348,14 @@ const server = createServer(async (req, res) => {
   } catch (err) {
     // Only errors deliberately marked `expose` reach the customer. Adapter errors can carry
     // an HTTP `status` of their own and would otherwise leak vendor/gateway details.
-    send(res, err.expose ? err.status : 500, { error: err.expose ? err.message : 'Internal error' }, err.retryAfter ? { 'Retry-After': String(err.retryAfter) } : {});
+    // A vendor that says "try again later" is not our bug: tell the caller to retry instead of reporting a crash.
+    if (err instanceof PendingError) {
+      log.warn('upstream asked us to retry later', { id: requestId, path: url.pathname }, err);
+      return send(res, 503, { error: 'This is temporarily unavailable. Please try again in a few minutes.' }, { 'Retry-After': String(Math.ceil(err.retryAfterMs / 1000)) });
+    }
+    const extra = { ...(err.retryAfter ? { 'Retry-After': String(err.retryAfter) } : {}), ...(err.status === 413 ? { Connection: 'close' } : {}) };
+    if (err.status === 413) res.once('finish', () => req.socket.destroy());
+    send(res, err.expose ? err.status : 500, { error: err.expose ? err.message : 'Internal error' }, extra);
     if (!err.expose) log.error('unhandled error', { id: requestId, path: url.pathname }, err);
   }
 });

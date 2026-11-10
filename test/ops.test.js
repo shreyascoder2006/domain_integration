@@ -82,7 +82,7 @@ test('startup: production refuses mock adapters and a missing credentials key; d
   const r = checkEnv(prod);
   assert.ok(r.errors.some((e) => /CREDENTIALS_KEY/.test(e)));
   assert.equal(r.errors.filter((e) => /"mock" in production/.test(e)).length, 4);
-  const ok = checkEnv({ ...prod, CREDENTIALS_KEY: 'k', REGISTRAR: 'namesilo', DNS_PROVIDER: 'cloudflare', MAILBOX_VENDOR: 'zapmail', PAYMENTS: 'razorpay', RAZORPAY_WEBHOOK_SECRET: 's', ZAPMAIL_WEBHOOK_SECRET: 's', ZAPMAIL_WORKSPACE_KEY: 'w' });
+  const ok = checkEnv({ ...prod, CREDENTIALS_KEY: 'k', REGISTRAR: 'namesilo', DNS_PROVIDER: 'cloudflare', MAILBOX_VENDOR: 'zapmail', PAYMENTS: 'razorpay', RAZORPAY_WEBHOOK_SECRET: 's', ZAPMAIL_WEBHOOK_SECRET: 's', ZAPMAIL_WORKSPACE_KEY: 'w', NOTIFY_PROVIDER: 'resend', PUBLIC_URL: 'https://x.test' });
   assert.deepEqual(ok, { errors: [], warnings: [] });
   assert.deepEqual(checkEnv({ ...prod, CREDENTIALS_KEY: 'k', ALLOW_MOCKS: '1' }).errors, []);
   assert.ok(checkEnv({ NODE_ENV: 'production', CREDENTIALS_KEY: 'k', ALLOW_MOCKS: '1', ADMIN_TOKEN: 'short' }).errors.some((e) => /ADMIN_TOKEN/.test(e)));

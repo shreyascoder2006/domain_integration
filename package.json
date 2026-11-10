@@ -1,11 +1,18 @@
 {
   "name": "cloudlead-infra-purchase",
-  "version": "0.1.0",
-  "description": "CloudLead.ai in-app email infrastructure purchase (prototype with swappable vendor adapters)",
+  "version": "0.2.0",
+  "description": "CloudLead.ai in-app email infrastructure purchase: domains, mailboxes, recurring billing, with swappable vendor adapters",
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "preflight": "node scripts/preflight.js",
+    "simulate": "node scripts/simulate.js",
+    "backup": "node scripts/backup.js",
+    "restore": "node scripts/restore.js",
+    "rotate-key": "node scripts/rotate-key.js",
+    "migrate:sqlite": "node scripts/migrate-to-sqlite.js",
+    "docs:openapi": "node scripts/gen-openapi.js"
   },
-  "engines": { "node": ">=20" }
+  "engines": { "node": ">=22.5" }
 }
