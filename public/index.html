@@ -189,12 +189,60 @@ async function next() {
   } catch (e) { S.error = e.message; }
   render();
 }
+/* ---------- Payment: server prices the cart, the gateway takes the money, the server verifies ---------- */
 async function pay() {
-  S.busy = true; render();
+  S.busy = true; S.error = ''; render();
   try {
-    S.order = await api('/api/orders', { ...cartPayload(), contact: S.contact, forwardingDomain: S.forwarding, acceptedTerms: S.terms, paymentToken: 'tok_demo', idempotencyKey: S.idem });
-    S.busy = false; poll();
+    const co = await api('/api/checkout', { ...cartPayload(), contact: S.contact, forwardingDomain: S.forwarding, acceptedTerms: S.terms, idempotencyKey: S.idem });
+    if (co.payment.mode === 'mock') {
+      // Demo gateway: no popup, "pay" instantly.
+      return finishPayment(co, { paymentId: 'pay_mock_' + Math.random().toString(16).slice(2, 10) });
+    }
+    await loadCheckoutScript();
+    const p = co.payment, k = p.client;
+    const rzp = new Razorpay({
+      key: k.key, amount: p.amountMinor, currency: p.currency, name: k.name, description: k.description,
+      order_id: p.orderId, prefill: k.prefill, notes: k.notes,
+      handler: (r) => finishPayment(co, { paymentId: r.razorpay_payment_id, signature: r.razorpay_signature }),
+      modal: { ondismiss: () => { S.busy = false; render(); } }
+    });
+    rzp.on('payment.failed', (e) => { S.busy = false; S.error = 'Payment failed: ' + (e.error?.description || 'please try again'); render(); });
+    rzp.open();
   } catch (e) { S.busy = false; S.error = e.message; render(); }
+}
+
+let checkoutScript;
+function loadCheckoutScript() {
+  return checkoutScript ||= new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    s.onload = resolve; s.onerror = () => { checkoutScript = null; reject(new Error('Could not load the payment form. Check your connection.')); };
+    document.head.appendChild(s);
+  });
+}
+
+async function finishPayment(co, proof) {
+  S.busy = true; render();
+  // The money may already have left the card: never show a plain error here. Retry the
+  // confirmation, then fall back to waiting for the gateway's webhook to create the order.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      S.order = await api(`/api/checkout/${co.checkoutId}/confirm`, proof);
+      S.busy = false; return poll();
+    } catch (e) {
+      if (/verification failed|does not match|not completed/i.test(e.message)) { S.busy = false; S.error = e.message; return render(); }
+      await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+    }
+  }
+  $('#view').innerHTML = '<h2>Payment received</h2><p class="sub">We are confirming your payment. This page will update automatically; you will not be charged twice.</p>';
+  for (let i = 0; i < 60; i++) {
+    await new Promise((r) => setTimeout(r, 3000));
+    try {
+      const st = await api(`/api/checkout/${co.checkoutId}`);
+      if (st.order) { S.order = st.order; S.busy = false; return poll(); }
+    } catch { /* keep waiting */ }
+  }
+  S.busy = false; S.error = 'Your payment went through but confirmation is taking longer than expected. Please contact support with reference ' + co.checkoutId + '.'; render();
 }
 
 /* ---------- Event binding ---------- */
