@@ -41,6 +41,7 @@
   ul.terms{margin:8px 0;padding-left:18px;color:var(--muted);font-size:14px}
   .prog{display:grid;gap:10px} .pd{border:1px solid var(--line);border-radius:8px;padding:10px 12px}
   .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px} .chip{font-size:12px;padding:2px 8px;border-radius:999px;background:var(--line);color:var(--muted)}
+  .chip.waiting{background:var(--soft);color:var(--brand);font-style:italic}
   .chip.done{background:var(--okbg);color:var(--ok)} .chip.running{background:var(--soft);color:var(--brand)} .chip.failed{background:var(--errbg);color:var(--err)}
 </style>
 </head>
@@ -236,7 +237,7 @@ async function search() {
 }
 
 /* ---------- Progress after payment ---------- */
-const LABEL = { register: 'Register domain', nameservers: 'Set up DNS zone', dns_base: 'SPF / DMARC / MX', mailboxes: 'Create mailboxes', dns_dkim: 'DKIM', connect: 'Connect to sending pool' };
+const LABEL = { register: 'Register domain', nameservers: 'Set up DNS zone', connect_domain: 'Verify domain', mailboxes_ready: 'Mailboxes ready', dns_base: 'SPF / DMARC / MX', mailboxes: 'Create mailboxes', dns_dkim: 'DKIM', connect: 'Connect to sending pool' };
 function renderProgress() {
   const o = S.order;
   const title = { paid: 'Payment received', provisioning: 'Setting up your infrastructure…', completed: 'All set! Your mailboxes are connected', partial_failure: 'Some items need attention' }[o.status] || o.status;

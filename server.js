@@ -9,7 +9,7 @@ import { quote, margin } from './lib/pricing.js';
 import { suggestDomains, normalizeSeed } from './lib/domainSuggest.js';
 import { Store } from './lib/store.js';
 import { loadProviders } from './lib/providers/index.js';
-import { provision, initProgress, publicOrder } from './lib/provisioner.js';
+import { provision, initProgress, publicOrder, resumeDue } from './lib/provisioner.js';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const PUBLIC = join(ROOT, 'public');
@@ -50,7 +50,8 @@ function validateCart(b) {
       const firstName = String(m.firstName || '').trim();
       const lastName = String(m.lastName || '').trim();
       if (!firstName || !lastName) throw httpError(400, `First and last name required for ${name}`);
-      if (!PREFIX_RE.test(emailPrefix)) throw httpError(400, `Invalid email prefix: ${m.emailPrefix}`);
+      // No consecutive separators: mailbox vendors (e.g. Zapmail) reject "a..b", "a__b".
+      if (!PREFIX_RE.test(emailPrefix) || /[._-]{2}/.test(emailPrefix)) throw httpError(400, `Invalid email prefix: ${m.emailPrefix}`);
       if (seenPrefix.has(emailPrefix)) throw httpError(400, `Duplicate mailbox ${emailPrefix}@${name}`);
       seenPrefix.add(emailPrefix);
       return { firstName, lastName, emailPrefix };
@@ -123,6 +124,14 @@ const route = {
     if (taken.length) throw httpError(409, `No longer available: ${taken.join(', ')}`);
 
     const q = quote({ ...cart, mailboxes: cart.domains.flatMap((d) => d.mailboxes) });
+    // Never take money we cannot fulfil: make sure the mailbox vendor has free capacity.
+    if (providers.vendor.checkCapacity) {
+      const cap = await providers.vendor.checkCapacity({ provider: cart.provider, mailboxCount: q.mailboxCount });
+      if (!cap.ok) {
+        console.error(`[capacity] refusing order: ${cap.reason || 'vendor out of capacity'}`);
+        throw httpError(503, 'We are temporarily out of mailbox capacity. Please try again shortly.');
+      }
+    }
     const charge = await providers.payments.charge({ amount: q.total, currency: q.currency, source: b.paymentToken });
     if (charge.status !== 'succeeded') throw httpError(402, 'Payment failed');
 
@@ -185,11 +194,15 @@ createServer(async (req, res) => {
       requireAdmin(req);
       if (req.method === 'GET' && url.pathname === '/api/admin/orders') {
         return send(res, 200, Object.values(store.data.orders).map((o) => ({
-          ...publicOrder(o),
+          ...publicOrder(o, { admin: true }),
           internalMargin: o.internalMargin,
           refunds: o.refunds || [],
           suggestedRefund: o.progress ? suggestedRefund(o) : null
         })));
+      }
+      if (req.method === 'GET' && url.pathname === '/api/admin/vendor') {
+        if (!providers.vendor.getCapacity) return send(res, 200, { vendor: providers.vendor.name, capacity: null });
+        return send(res, 200, { vendor: providers.vendor.name, capacity: await providers.vendor.getCapacity() });
       }
       const ar = url.pathname.match(/^\/api\/admin\/orders\/(\w+)\/refund$/);
       if (req.method === 'POST' && ar) {
@@ -227,5 +240,11 @@ createServer(async (req, res) => {
   }
 }).listen(process.env.PORT || 3000, () => {
   console.log(`CloudLead infra purchase prototype on http://localhost:${process.env.PORT || 3000}`);
+  // Re-check waiting steps, finish new orders and recover from crashes.
+  const pollMs = Number(process.env.POLL_INTERVAL_MS ?? 15000);
+  if (pollMs > 0) {
+    resumeDue({ providers, store }); // pick up anything left over from the last run
+    setInterval(() => resumeDue({ providers, store }), pollMs).unref();
+  }
   console.log(`adapters: registrar=${providers.registrar.name} dns=${providers.dns.name} vendor=${providers.vendor.name} payments=${providers.payments.name}`);
 });
