@@ -202,7 +202,8 @@ async function pay() {
     const p = co.payment, k = p.client;
     const rzp = new Razorpay({
       key: k.key, amount: p.amountMinor, currency: p.currency, name: k.name, description: k.description,
-      order_id: p.orderId, prefill: k.prefill, notes: k.notes,
+      ...(p.kind === 'subscription' ? { subscription_id: p.subscriptionId } : { order_id: p.orderId }),
+      prefill: k.prefill, notes: k.notes,
       handler: (r) => finishPayment(co, { paymentId: r.razorpay_payment_id, signature: r.razorpay_signature }),
       modal: { ondismiss: () => { S.busy = false; render(); } }
     });
@@ -295,10 +296,37 @@ function renderProgress() {
   $('#view').innerHTML = `<h2>${esc(title)}</h2><p class="sub">Order ${esc(o.id)} · ${money(o.quote.total)} paid. You can leave this page; setup continues.</p>
     <div class="prog">${o.progress.map((p) => `<div class="pd"><b>${esc(p.domain)}</b><div class="chips">
     ${Object.entries(p.steps).map(([k, s]) => `<span class="chip ${s.status}" title="${esc(s.error || '')}">${esc(LABEL[k])}${s.status === 'failed' ? ' ✕' : s.status === 'done' ? ' ✓' : ''}</span>`).join('')}</div></div>`).join('')}</div>
-    <div id="mbx"></div>`;
+    ${billingBlock(o)}<div id="mbx"></div>`;
+  $('#cancelSub')?.addEventListener('click', cancelSubscription);
   if (o.status === 'completed') loadMailboxes();
 }
+
+/* ---------- Recurring billing: what happens next, and how to stop it ---------- */
+const fmtDate = (iso) => new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+function billingBlock(o) {
+  const b = o.billing;
+  if (!b) return '';
+  const lines = [];
+  if (b.status === 'active' && b.nextChargeAt) lines.push(`Next charge: <b>${money(b.nextChargeAmount)}</b> on ${esc(fmtDate(b.nextChargeAt))}. Your plan renews automatically.`);
+  if (b.paymentFailed) lines.push(`<span style="color:var(--err)">Your last payment failed.${b.payBy ? ' Please update your payment method by ' + esc(fmtDate(b.payBy)) + ' to keep your mailboxes.' : ''}</span>`);
+  if (b.status === 'cancelling') lines.push(`Auto-renewal is cancelled. Your mailboxes keep working until <b>${esc(fmtDate(b.serviceEndsAt))}</b>.`);
+  if (['ended', 'suspended', 'terminated'].includes(b.status)) lines.push('This service has ended.');
+  const canCancel = b.status === 'active' && S.manageToken;
+  return `<div class="card" style="margin-top:16px"><b>Billing</b><p class="sub" style="margin:6px 0 0">${lines.join('<br>') || 'No upcoming charges.'}</p>
+    ${canCancel ? '<button class="btn ghost" id="cancelSub" style="margin-top:10px">Cancel auto-renewal</button>' : ''}</div>`;
+}
+async function cancelSubscription() {
+  if (!confirm('Cancel auto-renewal? Your mailboxes keep working until the end of the period you have already paid for.')) return;
+  try {
+    const r = await fetch(`/api/orders/${S.order.id}/cancel`, { method: 'POST', headers: { 'x-manage-token': S.manageToken } });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'Could not cancel');
+    S.order = { ...S.order, billing: j };
+    renderProgress();
+  } catch (e) { alert(e.message); }
+}
 async function poll() {
+  if (S.order?.manageToken) S.manageToken = S.order.manageToken; // handed out once, at purchase: keep it in memory
   renderProgress();
   while (S.order && !['completed', 'partial_failure'].includes(S.order.status)) {
     await new Promise((r) => setTimeout(r, 700));

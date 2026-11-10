@@ -9,6 +9,10 @@ import { toMinor } from '../lib/money.js';
 import { Store } from '../lib/store.js';
 import { mockRegistrar, mockDns, mockMailboxVendor } from '../lib/providers/mock.js';
 
+// This file covers the one-off payment path. With a gateway that supports subscriptions checkout
+// uses those by default (see billing.test.js), so pin the mode here. Each test file runs in its own process.
+process.env.BILLING_MODE = 'one_time';
+
 const hmac = (key, msg) => createHmac('sha256', key).update(msg).digest('hex');
 const SECRET = 'KEYSECRET', WH = 'WHSECRET';
 

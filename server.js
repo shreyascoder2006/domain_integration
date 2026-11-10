@@ -95,7 +95,18 @@ createServer(async (req, res) => {
     if (req.method === 'GET' && m) {
       const o = store.getOrder(m[1]);
       if (!o) throw httpError(404, 'Order not found');
-      return send(res, 200, publicOrder(o));
+      return send(res, 200, { ...publicOrder(o), billing: checkout.billing.summary(o) });
+    }
+    // Customer cancels their subscription at the end of the paid period. Proof of ownership is the
+    // manage token handed out once at purchase (swap for CloudLead's real auth when integrating).
+    const cn = url.pathname.match(/^\/api\/orders\/(\w+)\/cancel$/);
+    if (req.method === 'POST' && cn) {
+      const o = store.getOrder(cn[1]);
+      if (!o) throw httpError(404, 'Order not found');
+      const got = Buffer.from(String(req.headers['x-manage-token'] || ''));
+      const want = Buffer.from(String(o.manageToken || ''));
+      if (!want.length || got.length !== want.length || !timingSafeEqual(got, want)) throw httpError(403, 'Not allowed');
+      return send(res, 200, await checkout.billing.cancel(o.id, { atCycleEnd: true }));
     }
     // POST /api/orders/:id/retry  (resume a partially failed order; done steps are skipped)
     const r = url.pathname.match(/^\/api\/orders\/(\w+)\/retry$/);
@@ -114,6 +125,7 @@ createServer(async (req, res) => {
         return send(res, 200, Object.values(store.data.orders).map((o) => ({
           ...publicOrder(o, { admin: true }),
           internalMargin: o.internalMargin,
+          billing: o.billing || null, // full detail: plan ids, history, renewals, anything needing attention
           refunds: o.refunds || [],
           suggestedRefund: o.progress ? suggestedRefund(o) : null
         })));
@@ -121,6 +133,15 @@ createServer(async (req, res) => {
       if (req.method === 'GET' && url.pathname === '/api/admin/vendor') {
         if (!providers.vendor.getCapacity) return send(res, 200, { vendor: providers.vendor.name, capacity: null });
         return send(res, 200, { vendor: providers.vendor.name, capacity: await providers.vendor.getCapacity() });
+      }
+      const ac = url.pathname.match(/^\/api\/admin\/orders\/(\w+)\/cancel$/);
+      if (req.method === 'POST' && ac) {
+        const b = await readBody(req);
+        return send(res, 200, await checkout.billing.cancel(ac[1], { atCycleEnd: b.atCycleEnd !== false }));
+      }
+      if (req.method === 'POST' && url.pathname === '/api/admin/billing/tick') {
+        await checkout.billing.tick();
+        return send(res, 200, { ok: true });
       }
       const ar = url.pathname.match(/^\/api\/admin\/orders\/(\w+)\/refund$/);
       if (req.method === 'POST' && ar) {
@@ -173,8 +194,12 @@ createServer(async (req, res) => {
   // Re-check waiting steps, finish new orders and recover from crashes.
   const pollMs = Number(process.env.POLL_INTERVAL_MS ?? 15000);
   if (pollMs > 0) {
-    resumeDue({ providers, store }); // pick up anything left over from the last run
-    setInterval(() => resumeDue({ providers, store }), pollMs).unref();
+    const run = () => {
+      resumeDue({ providers, store });
+      checkout.billing.tick().catch((e) => console.error('billing tick failed', e));
+    };
+    run(); // pick up anything left over from the last run
+    setInterval(run, pollMs).unref();
   }
   console.log(`adapters: registrar=${providers.registrar.name} dns=${providers.dns.name} vendor=${providers.vendor.name} payments=${providers.payments.name}`);
 });

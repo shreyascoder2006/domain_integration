@@ -7,11 +7,13 @@ Vendors are hidden from the customer (white-label).
 ## Run
 
     npm start          # http://localhost:3000, mock adapters, no keys needed
-    npm test           # 46 tests: pricing, adapters against simulated accounts (fake HTTP), crypto, refunds, pipeline, payments
+    npm test           # 72 tests: pricing, adapters against simulated accounts (fake HTTP), crypto, refunds, pipeline, payments, billing
 
 ## Payment flow (Razorpay)
 
-The server owns the price; the browser only carries payment proof.
+The server owns the price; the browser only carries payment proof. By default a purchase is a **recurring
+subscription** (see "Recurring billing"); `BILLING_MODE=one_time` makes it a single payment. Steps 1-5 below
+describe the one-off order flow; the subscription flow is the same shape with the differences listed after.
 
 1. `POST /api/checkout`: validate, re-check domain availability and vendor capacity, **price the cart on the
    server**, create the gateway order (Razorpay `receipt` = checkout id). The browser never sends an amount.
@@ -28,6 +30,41 @@ The server owns the price; the browser only carries payment proof.
 
 Webhooks need a public HTTPS URL (Razorpay rejects localhost); use a tunnel such as zrok while developing, and
 answer within 5 s (Razorpay retries for 24 h, then disables the webhook).
+
+## Recurring billing
+
+One Razorpay subscription per order. A gateway plan has a single fixed amount, but mailboxes renew every
+period (quarterly or yearly) while **domains renew yearly**, so the subscription alternates between two plans:
+
+| Plan | Amount | Used for cycles |
+|---|---|---|
+| renewal | mailboxes + yearly domain fee | 1, 5, 9, ... (quarterly) or every cycle (annual) |
+| base | mailboxes only | all other cycles |
+
+The first payment (the authorisation) is the full first-period amount, the same total the wizard shows. After each
+paid cycle `lib/billing.js` schedules a plan change **at cycle end** so the next charge uses the right plan. Plans
+are permanent at the gateway, so they are reused per (period, amount, currency). Quarterly is sent as "monthly x 3".
+
+Subscription differences from the one-off flow: the browser opens checkout with `subscription_id`; the checkout
+signature is `HMAC-SHA256(payment_id|subscription_id, key_secret)` (field order differs from orders); confirm also
+checks the subscription's plan and that `paid_count >= 1`; the webhook that creates the order is `subscription.charged`.
+
+What the webhooks drive (`subscription.*`, each handled idempotently by cycle number):
+
+- **charged**: records the cycle; if it is a domain cycle after the first, **renews every domain at the registrar**
+  (retried hourly, flagged for an admin after 5 failures); reinstates a past-due or suspended order; schedules the next plan.
+- **pending / halted** (charge failed, then every retry failed): `past_due`, then a **grace period**
+  (`BILLING_GRACE_DAYS`, default 7) with service intact.
+- After grace: mailboxes are **suspended** (flagged `suspended: true`, `status: "suspended"` in the store: CloudLead's
+  sending and warm-up engine must skip them). After `BILLING_RETENTION_DAYS` (default 14) the vendor is asked to
+  **remove the mailboxes** and domains are no longer renewed. A payment at any point before the vendor's next renewal
+  brings everything back; after that an admin must step in (`needsAttention`).
+- **cancelled / completed**: service runs to the end of the paid period, then follows the same suspend/remove path.
+
+The customer sees only a summary on `GET /api/orders/:id` (next charge date and amount, payment failed + pay-by date,
+service end date). Customers cancel with `POST /api/orders/:id/cancel` and the **manage token** returned once at
+purchase (a stand-in for real account auth). Admins see full billing state and history.
+Everything slow is retried by the same timer as the pipeline (`POLL_INTERVAL_MS`).
 
 ## Pipeline (per domain, after payment)
 
@@ -55,6 +92,7 @@ Customers only ever see generic messages: vendor names, raw errors and costs are
 - `lib/crypto.js` AES-256-GCM sealing (`CREDENTIALS_KEY`)
 - `lib/refunds.js` pro-rata refund suggestion and limits
 - `lib/checkout.js` checkout service: create / confirm / webhook, the only place an order is created
+- `lib/billing.js` subscription schedule maths and the lifecycle (renewals, plan changes, dunning, suspension, cancel)
 - `lib/validate.js` cart and contact validation; `lib/money.js` minor-unit conversion
 - `lib/providers/` adapters: `mock.js`, `namesilo.js`, `cloudflare.js`, `zapmail.js`, `razorpay.js`
 - `lib/errors.js` `PendingError` for "still working, check later"
@@ -71,6 +109,8 @@ Customers only ever see generic messages: vendor names, raw errors and costs are
 | `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` | required for `razorpay`. **Use test-mode keys first** |
 | `RAZORPAY_WEBHOOK_SECRET` | set when creating the webhook in the Dashboard. A separate secret from the key secret |
 | `PAYMENT_MERCHANT_NAME` | name shown in the checkout popup (default `CloudLead`) |
+| `BILLING_MODE` | `subscription` (default when the gateway supports it) or `one_time` |
+| `BILLING_GRACE_DAYS`, `BILLING_RETENTION_DAYS` | days of service after all charge retries fail (7), then days before mailboxes are removed (14) |
 | `ZAPMAIL_API_KEY` | required for `zapmail` |
 | `ZAPMAIL_WORKSPACE_KEY` | recommended: Zapmail's connection-requests endpoint requires it |
 | `ZAPMAIL_NAMESERVERS` | comma list. Zapmail's docs show four conflicting sets; the default is from the current connect-domain page. **Confirm with Zapmail** |
@@ -96,27 +136,32 @@ Generate a credentials key: `node -e "console.log(require('crypto').randomBytes(
     POST /api/checkout/:id/confirm   ({paymentId, signature}; idempotent, creates the order)
     GET  /api/checkout/:id           (status, and the order once a webhook has created it)
     POST /api/webhooks/razorpay      (raw body + X-Razorpay-Signature)
-    GET  /api/orders/:id
+    GET  /api/orders/:id             (includes a safe billing summary: next charge, payment failed, service end)
+    POST /api/orders/:id/cancel      (x-manage-token; cancels at the end of the paid period)
     POST /api/orders/:id/retry
-    GET  /api/mailboxes         (credentials never returned)
+    GET  /api/mailboxes         (credentials never returned; suspended mailboxes have status "suspended")
 
     # admin (x-admin-token)
-    GET  /api/admin/orders                 (adds internal margin, refunds, suggested refund)
+    GET  /api/admin/orders                 (adds internal margin, full billing state + history, refunds, suggested refund)
+    POST /api/admin/orders/:id/cancel      ({atCycleEnd?: true})
+    POST /api/admin/billing/tick           (run the billing timer now)
     POST /api/admin/orders/:id/refund      ({amount?, reason?}; defaults to the suggested pro-rata amount)
     GET  /api/admin/vendor                 (vendor wallet balance and free mailbox slots)
 
 ## Verification status of the real adapters
 
 - **NameSilo**: request/response shapes taken from NameSilo's published API reference
-  (checkRegisterAvailability, registerDomain, changeNameServers, response codes). Run only against fake HTTP.
+  (checkRegisterAvailability, registerDomain, renewDomain, getDomainInfo, changeNameServers, response codes).
+  Run only against fake HTTP. Renewals are paid from the NameSilo account balance: keep it funded.
 - **Cloudflare**: shapes taken from Cloudflare's published docs (zones, dns_records, redirect rulesets).
   Run only against fake HTTP. Check in a scratch account: TXT content quoting, and that Single Redirect
   works on a fresh zone.
 - **Zapmail**: shapes taken from docs.zapmail.ai (domains, connection-requests, connect-domain, mailboxes list/assign,
   dmarc, forwarding, wallet). Run only against a simulated account. **Zapmail has no sandbox**: the first live run spends real money.
-- **Razorpay**: Orders, Standard Checkout options, both signature schemes, refunds (with `X-Refund-Idempotency`),
-  webhook headers and test cards were all taken from razorpay.com/docs. Run only against a simulated account;
-  **the checkout popup itself has not been opened** (needs real test keys).
+- **Razorpay**: Orders, Subscriptions (plans, create, update, cancel), Standard Checkout options, both signature
+  schemes, refunds (with `X-Refund-Idempotency`), webhook headers and test cards were all taken from
+  razorpay.com/docs. Run only against a simulated account; **the checkout popup itself has not been opened**
+  (needs real test keys).
 - None of the four has been run with real keys.
 
 ### Razorpay: things to do and check before launch
@@ -132,8 +177,23 @@ Generate a credentials key: `node -e "console.log(require('crypto').randomBytes(
 4. Refunds are paid from your Razorpay balance, may be `pending` (5-7 days for `normal` speed), and `refund.*`
    webhook payloads were not read: we only log them. Failed refunds are rejected, not recorded.
 5. Rate limits are not documented.
-6. **Recurring billing is not built.** "Auto-renews quarterly" is in the terms, but nothing charges customers again
-   yet. That needs Razorpay Subscriptions or saved-card tokens, plus the matching vendor renewals.
+6. **Subscriptions: verify these in test mode before trusting recurring billing.**
+   - *First payment amount.* Razorpay's docs mention a small refunded "authorisation" amount for some flows. We assume
+     the authorisation transaction **is** the first full cycle charge. If it is only a token, the first
+     `subscription.charged` arrives later: the webhook path still creates the order, but check it.
+   - *Plan changes at cycle end* (`PATCH` with `schedule_change_at: "cycle_end"`). The docs do not say which amount is
+     charged in the interim, whether the new plan's currency must match (ours always do), or that a pending change
+     cannot be applied while the subscription is `pending`. We retry hourly. Watch `billing.planError` in the admin view.
+   - *USD recurring needs international cards only.* UPI and eMandate are INR-only and cannot be used with USD plans.
+     Plan changes are not allowed for UPI or eMandate subscriptions either.
+   - *Subscription length.* Razorpay charges a subscription for at most 10 years: `totalCount` is capped accordingly
+     (40 quarters, 10 years). After that the customer must re-subscribe.
+   - *Cancel at cycle end* is rejected in the final cycle and before the first charge; we surface a generic error.
+   - Events handled: `subscription.charged / pending / halted / cancelled / completed / updated`. Enable them on the webhook.
+   - Razorpay's docs on subscription refunds were not found; refunds use the normal payment refund API.
+7. **Domain renewal timing.** Domains renew when the renewal-cycle charge is confirmed, i.e. around the registration
+   anniversary. NameSilo has a post-expiry grace/restoration period (`renewDomain` also restores), but a domain can be
+   briefly dark if a webhook is late. Consider registering with a few days of slack or renewing earlier.
 
 ### Zapmail: open questions to settle with them before launch
 
@@ -158,8 +218,11 @@ Generate a credentials key: `node -e "console.log(require('crypto').randomBytes(
 - Zapmail webhooks (`mailbox.updated`, `domain.connection_status_changed`; HMAC-SHA256 `X-Zapmail-Signature`)
   would replace polling for faster updates.
 - Replace the JSON store and the hard-coded `demo-user` with CloudLead's DB and auth.
-- Domain and mailbox renewals, auto-renew billing, vendor webhooks.
+- Mailbox removal is only scheduled for the vendor's next renewal (Zapmail has no immediate delete, and the docs do
+  not say whether the slot returns). The vendor's own subscription renewal is outside this app: keep their wallet funded.
+- The sending/warm-up engine must honour `suspended: true` on mailboxes, otherwise suspension has no effect.
+- Customers cannot change payment method, upgrade, or add mailboxes yet (the gateway's hosted page handles card changes
+  for failed charges; adding mailboxes to an existing domain is blocked by the terms).
+- Customer cancellation uses a one-time manage token because this prototype has no accounts. Replace with real auth.
 - Rate limiting and abuse checks on domain suggest and order endpoints.
 - Provisioning retry delays are short (150 ms x attempt): lengthen for real services (e.g. NameSilo 268 "retry later").
-- NameSilo 262 ("domain already active") is treated as an error, so a crash between a successful
-  registration and saving the step could make a retry fail: reconcile manually or add a domain-info check.
