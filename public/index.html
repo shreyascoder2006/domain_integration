@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CloudLead Infrastructure</title>
+<style>
+  :root{
+    --bg:#f7f7fb; --card:#fff; --ink:#1b1b2f; --muted:#6b6b80; --line:#e4e4ee;
+    --brand:#6a4df0; --brand-ink:#fff; --soft:#f0edff; --ok:#16875a; --okbg:#e8f7f0; --err:#c0392b; --errbg:#fdecea;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{--bg:#12121c;--card:#1b1b2b;--ink:#ecebf7;--muted:#9a99b3;--line:#2e2e45;--soft:#25214a;--okbg:#12301f;--errbg:#3a1a1a;}
+  }
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  header{padding:16px 24px;border-bottom:1px solid var(--line);background:var(--card);font-weight:700}
+  header span{color:var(--brand)}
+  main{max-width:880px;margin:0 auto;padding:24px 16px 120px}
+  .steps{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:24px}
+  .step{padding:6px 12px;border-radius:999px;background:var(--card);border:1px solid var(--line);color:var(--muted);font-size:13px}
+  .step.on{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)} .step.done{color:var(--ok);border-color:var(--ok)}
+  h2{margin:0 0 4px;font-size:20px} .sub{color:var(--muted);margin:0 0 16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:16px}
+  .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+  .opt{border:2px solid var(--line);border-radius:10px;padding:14px;cursor:pointer;background:var(--card);text-align:left;color:inherit;font:inherit}
+  .opt.sel{border-color:var(--brand);background:var(--soft)} .opt b{display:block;font-size:16px} .opt small{color:var(--muted)}
+  .price{font-size:22px;font-weight:700} .tag{font-size:11px;background:#f5a623;color:#000;border-radius:4px;padding:1px 6px;margin-left:6px}
+  input,select{font:inherit;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);width:100%}
+  input:focus,select:focus{outline:2px solid var(--brand);outline-offset:0}
+  label{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+  .row{display:flex;gap:8px;align-items:end;flex-wrap:wrap} .row>*{flex:1;min-width:140px} .row>button{flex:0 0 auto}
+  button.btn{background:var(--brand);color:var(--brand-ink);border:0;padding:10px 18px;border-radius:8px;font:inherit;font-weight:600;cursor:pointer}
+  button.btn:disabled{opacity:.45;cursor:not-allowed} button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+  .dom{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);border-radius:8px;padding:10px 12px;cursor:pointer;background:var(--card)}
+  .dom.sel{border-color:var(--ok);background:var(--okbg)} .doms{display:grid;gap:8px;grid-template-columns:repeat(auto-fill,minmax(250px,1fr))}
+  .msg{padding:10px 12px;border-radius:8px;margin:10px 0;font-size:14px} .msg.err{background:var(--errbg);color:var(--err)} .msg.info{background:var(--soft)}
+  table{width:100%;border-collapse:collapse} td,th{padding:6px;text-align:left;font-size:14px} th{color:var(--muted);font-weight:500}
+  td input{padding:6px 8px}
+  .bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:12px 24px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+  .bar .tot{font-size:14px;color:var(--muted)} .bar .tot b{color:var(--ink);font-size:16px}
+  ul.terms{margin:8px 0;padding-left:18px;color:var(--muted);font-size:14px}
+  .prog{display:grid;gap:10px} .pd{border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px} .chip{font-size:12px;padding:2px 8px;border-radius:999px;background:var(--line);color:var(--muted)}
+  .chip.done{background:var(--okbg);color:var(--ok)} .chip.running{background:var(--soft);color:var(--brand)} .chip.failed{background:var(--errbg);color:var(--err)}
+</style>
+</head>
+<body>
+<header>Cloud<span>Lead</span>.ai · Email Infrastructure</header>
+<main>
+  <div class="steps" id="steps"></div>
+  <div id="view"></div>
+</main>
+<div class="bar" id="bar"></div>
+
+<script>
+const STEPS = ['Plan', 'Domains', 'Mailboxes', 'Contact', 'Review'];
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money = (n) => '$' + Number(n).toFixed(2);
+
+const S = {
+  step: 0, cfg: null, provider: 'google', plan: 'quarterly',
+  seed: '', suggestions: [], exact: null, selected: [], forwarding: '',
+  persona: { first: '', last: '', perDomain: 4 }, boxes: {},  // boxes[domain] = [{firstName,lastName,emailPrefix}]
+  contact: { firstName:'', lastName:'', company:'', address:'', country:'', city:'', zip:'', phone:'' },
+  terms: false, quote: null, error: '', busy: false, order: null, idem: crypto.randomUUID()
+};
+
+async function api(path, body) {
+  const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : undefined);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || 'Request failed');
+  return j;
+}
+const cartPayload = () => ({
+  provider: S.provider, plan: S.plan,
+  domains: S.selected.map((d) => ({ name: d, mailboxes: S.boxes[d] || [] }))
+});
+
+function render() {
+  $('#steps').innerHTML = STEPS.map((n, i) => `<div class="step ${i === S.step ? 'on' : i < S.step ? 'done' : ''}">${i + 1}. ${n}</div>`).join('');
+  const v = [viewPlan, viewDomains, viewMailboxes, viewContact, viewReview][S.step];
+  if (S.order) return renderProgress();
+  $('#view').innerHTML = v() + (S.error ? `<div class="msg err">${esc(S.error)}</div>` : '');
+  bind();
+  renderBar();
+}
+
+/* ---------- Step 1: plan ---------- */
+function viewPlan() {
+  const c = S.cfg;
+  const prov = Object.entries(c.providers).map(([k, p]) =>
+    `<button class="opt ${S.provider === k ? 'sel' : ''}" data-provider="${k}"><b>${esc(p.label)}</b><small>${k === 'azure' ? 'Dedicated IP, 50 mailboxes per tenant' : 'Real inboxes, OAuth connected'}</small></button>`).join('');
+  const plans = S.provider === 'azure'
+    ? `<div class="opt sel"><b>Quarterly</b><div class="price">$${c.azure.pricePerTenantMonth}<small> / tenant / month</small></div><small>${money(c.azure.pricePerTenantMonth * 3)} per quarter · ${c.azure.mailboxesPerTenant} mailboxes included</small></div>`
+    : Object.entries(c.plans).map(([k, p]) =>
+      `<button class="opt ${S.plan === k ? 'sel' : ''}" data-plan="${k}"><b>${esc(p.label)}${k === 'annual_flexi' ? '<span class="tag">Recommended</span>' : ''}</b>
+       <div class="price">${money(p.pricePerMailboxMonth)}<small> / mailbox / mo</small></div>
+       <small>Billed ${p.billingMonths === 12 ? 'annually' : 'every 3 months'} · min ${p.minMailboxes} mailbox${p.minMailboxes > 1 ? 'es' : ''}<br>${esc(p.commitment)}${p.note ? '<br>' + esc(p.note) : ''}</small></button>`).join('');
+  return `<h2>Choose your plan</h2><p class="sub">Pick an email provider and billing term.</p>
+    <div class="card"><div class="grid">${prov}</div></div>
+    <div class="card"><div class="grid">${plans}</div></div>
+    <div class="msg info">Cold emailing can hurt your main domain. Use lookalike domains (getacme.com instead of acme.com).</div>`;
+}
+
+/* ---------- Step 2: domains ---------- */
+function viewDomains() {
+  const list = S.suggestions.map((d) =>
+    `<div class="dom ${S.selected.includes(d) ? 'sel' : ''}" data-dom="${esc(d)}"><span>${esc(d)}</span><span>${money(S.cfg.domainPricePerYear)}/yr</span></div>`).join('');
+  const exact = S.exact && !S.exact.available ? `<div class="msg info">${esc(S.exact.domain)} is not available, here are alternatives.</div>` : '';
+  return `<h2>Pick your domains</h2><p class="sub">Recommended: ${S.cfg.recommendedMailboxesPerDomain} mailboxes per domain, .com for best deliverability.</p>
+    <div class="card"><div class="row"><div><label>Your brand or main domain</label><input id="seed" value="${esc(S.seed)}" placeholder="e.g. acme.com"></div>
+    <button class="btn" id="search" ${S.busy ? 'disabled' : ''}>${S.busy ? 'Searching…' : 'Search'}</button></div>${exact}</div>
+    ${S.suggestions.length ? `<div class="card"><label>Suggested domains (${S.selected.length} selected)</label><div class="doms">${list}</div></div>
+    <div class="card"><label>Forwarding domain (optional): your real website that these domains redirect to</label><input id="fwd" value="${esc(S.forwarding)}" placeholder="acme.com"></div>` : ''}`;
+}
+
+/* ---------- Step 3: mailboxes ---------- */
+function variants(first, last, n) {
+  const f = first.toLowerCase().replace(/[^a-z0-9]/g, ''), l = last.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return [`${f}.${l}`, `${l}.${f}`, f, `${f}.${l[0] || ''}`.replace(/\.$/, ''), `${f[0] || ''}.${l}`, `${f}${l[0] || ''}`].filter(Boolean).slice(0, n);
+}
+function generateBoxes() {
+  const { first, last, perDomain } = S.persona;
+  for (const d of S.selected) S.boxes[d] = variants(first, last, perDomain).map((p) => ({ firstName: first, lastName: last, emailPrefix: p }));
+}
+function viewMailboxes() {
+  const tables = S.selected.map((d) => `<div class="card"><b>${esc(d)}</b>
+    <table><tr><th>First</th><th>Last</th><th>Email</th><th></th></tr>
+    ${(S.boxes[d] || []).map((m, i) => `<tr><td><input data-d="${esc(d)}" data-i="${i}" data-f="firstName" value="${esc(m.firstName)}"></td>
+      <td><input data-d="${esc(d)}" data-i="${i}" data-f="lastName" value="${esc(m.lastName)}"></td>
+      <td><div class="row" style="flex-wrap:nowrap;gap:4px"><input data-d="${esc(d)}" data-i="${i}" data-f="emailPrefix" value="${esc(m.emailPrefix)}"><span>@${esc(d)}</span></div></td>
+      <td><button class="btn ghost" data-rm="${esc(d)}" data-i="${i}">✕</button></td></tr>`).join('')}</table>
+    <button class="btn ghost" data-add="${esc(d)}" ${(S.boxes[d] || []).length >= S.cfg.maxMailboxesPerDomain ? 'disabled' : ''}>+ Add mailbox</button></div>`).join('');
+  return `<h2>Create mailboxes</h2><p class="sub">Enter a sender name once and we generate the variations for every domain.</p>
+    <div class="card"><div class="row"><div><label>First name</label><input id="pf" value="${esc(S.persona.first)}"></div>
+    <div><label>Last name</label><input id="pl" value="${esc(S.persona.last)}"></div>
+    <div><label>Mailboxes per domain</label><select id="pn">${[1,2,3,4,5].map((n) => `<option ${n === S.persona.perDomain ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+    <button class="btn" id="gen">Generate</button></div></div>${tables}`;
+}
+
+/* ---------- Step 4: contact ---------- */
+function viewContact() {
+  const f = (k, label, span) => `<div style="${span ? 'grid-column:1/-1' : ''}"><label>${label}</label><input data-c="${k}" value="${esc(S.contact[k])}"></div>`;
+  return `<h2>Contact details</h2><p class="sub">Used to register your domains and create the mailboxes.</p>
+    <div class="card"><div class="grid">${f('firstName','First name')}${f('lastName','Last name')}${f('company','Company')}${f('address','Address',1)}
+    ${f('country','Country')}${f('city','City')}${f('zip','ZIP / postal code')}${f('phone','Phone number')}</div></div>`;
+}
+
+/* ---------- Step 5: review ---------- */
+function viewReview() {
+  const q = S.quote;
+  if (!q) return `<div class="msg info">Calculating…</div>`;
+  return `<h2>Review &amp; pay</h2><p class="sub">${q.domainCount} domain(s), ${q.mailboxCount} mailbox(es) on ${esc(S.cfg.providers[S.provider].label)}.</p>
+    <div class="card"><table>${q.lines.map((l) => `<tr><td>${esc(l.label)}</td><td style="text-align:right">${money(l.amount)}</td></tr>`).join('')}
+    <tr><td><b>Total due today</b></td><td style="text-align:right"><b>${money(q.total)}</b></td></tr></table>
+    <ul class="terms"><li>Email accounts auto-renew each billing period.</li><li>Mid-term deletions are non-refundable.</li>
+    <li>Additional mailboxes cannot be added to an existing domain after purchase.</li>
+    <li>Email account credentials are not provided, to prevent multiple logins and avoid IP/mailbox blocking.</li></ul>
+    <label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input type="checkbox" id="terms" style="width:auto" ${S.terms ? 'checked' : ''}> I agree with all the above terms &amp; conditions</label></div>`;
+}
+
+/* ---------- Footer bar + navigation ---------- */
+function renderBar() {
+  const q = S.quote, tot = q && S.step >= 2 ? `<b>${S.selected.length}</b> domain(s) · <b>${S.selected.reduce((n, d) => n + (S.boxes[d] || []).length, 0)}</b> mailbox(es) · <b>${money(q.total)}</b> today` : '';
+  const last = S.step === 4;
+  $('#bar').innerHTML = `<div>${S.step > 0 ? '<button class="btn ghost" id="back">Back</button>' : ''}</div><div class="tot">${tot}</div>
+    <button class="btn" id="next" ${canNext() ? '' : 'disabled'}>${last ? (S.busy ? 'Processing…' : 'Pay now') : 'Next'}</button>`;
+  $('#back')?.addEventListener('click', () => { S.step--; S.error = ''; render(); });
+  $('#next').addEventListener('click', next);
+}
+function canNext() {
+  if (S.busy) return false;
+  if (S.step === 1) return S.selected.length > 0;
+  if (S.step === 2) return S.selected.length > 0 && S.selected.every((d) => (S.boxes[d] || []).length > 0);
+  if (S.step === 3) return Object.values(S.contact).every((v) => v.trim());
+  if (S.step === 4) return S.terms && S.quote;
+  return true;
+}
+async function next() {
+  S.error = '';
+  try {
+    if (S.step === 2 || S.step === 3) { S.quote = await api('/api/quote', cartPayload()); }
+    if (S.step === 4) return pay();
+    S.step++;
+    if (S.step === 4) S.quote = await api('/api/quote', cartPayload());
+  } catch (e) { S.error = e.message; }
+  render();
+}
+async function pay() {
+  S.busy = true; render();
+  try {
+    S.order = await api('/api/orders', { ...cartPayload(), contact: S.contact, forwardingDomain: S.forwarding, acceptedTerms: S.terms, paymentToken: 'tok_demo', idempotencyKey: S.idem });
+    S.busy = false; poll();
+  } catch (e) { S.busy = false; S.error = e.message; render(); }
+}
+
+/* ---------- Event binding ---------- */
+function bind() {
+  document.querySelectorAll('[data-provider]').forEach((b) => b.onclick = () => { S.provider = b.dataset.provider; S.quote = null; render(); });
+  document.querySelectorAll('[data-plan]').forEach((b) => b.onclick = () => { S.plan = b.dataset.plan; S.quote = null; render(); });
+  $('#seed')?.addEventListener('input', (e) => S.seed = e.target.value);
+  $('#seed')?.addEventListener('keydown', (e) => e.key === 'Enter' && search());
+  $('#search')?.addEventListener('click', search);
+  $('#fwd')?.addEventListener('input', (e) => S.forwarding = e.target.value);
+  document.querySelectorAll('[data-dom]').forEach((el) => el.onclick = () => {
+    const d = el.dataset.dom; S.selected = S.selected.includes(d) ? S.selected.filter((x) => x !== d) : [...S.selected, d]; render();
+  });
+  $('#pf')?.addEventListener('input', (e) => S.persona.first = e.target.value);
+  $('#pl')?.addEventListener('input', (e) => S.persona.last = e.target.value);
+  $('#pn')?.addEventListener('change', (e) => S.persona.perDomain = Number(e.target.value));
+  $('#gen')?.addEventListener('click', () => {
+    if (!S.persona.first.trim() || !S.persona.last.trim()) { S.error = 'Enter first and last name'; return render(); }
+    generateBoxes(); render();
+  });
+  document.querySelectorAll('input[data-f]').forEach((el) => el.addEventListener('input', () => {
+    S.boxes[el.dataset.d][+el.dataset.i][el.dataset.f] = el.value; renderBarOnly();
+  }));
+  document.querySelectorAll('[data-rm]').forEach((b) => b.onclick = () => { S.boxes[b.dataset.rm].splice(+b.dataset.i, 1); render(); });
+  document.querySelectorAll('[data-add]').forEach((b) => b.onclick = () => {
+    const d = b.dataset.add; S.boxes[d] = S.boxes[d] || []; S.boxes[d].push({ firstName: S.persona.first, lastName: S.persona.last, emailPrefix: '' }); render();
+  });
+  document.querySelectorAll('input[data-c]').forEach((el) => el.addEventListener('input', () => { S.contact[el.dataset.c] = el.value; renderBarOnly(); }));
+  $('#terms')?.addEventListener('change', (e) => { S.terms = e.target.checked; renderBarOnly(); });
+}
+const renderBarOnly = () => renderBar();
+
+async function search() {
+  S.error = ''; S.busy = true; render();
+  try {
+    const r = await api('/api/domains/suggest?seed=' + encodeURIComponent(S.seed));
+    S.suggestions = r.domains; S.exact = r.exact; S.selected = [];
+  } catch (e) { S.error = e.message; }
+  S.busy = false; render();
+}
+
+/* ---------- Progress after payment ---------- */
+const LABEL = { register: 'Register domain', dns_base: 'SPF / DMARC / MX', mailboxes: 'Create mailboxes', dns_dkim: 'DKIM', connect: 'Connect to sending pool' };
+function renderProgress() {
+  const o = S.order;
+  const title = { paid: 'Payment received', provisioning: 'Setting up your infrastructure…', completed: 'All set! Your mailboxes are connected', partial_failure: 'Some items need attention' }[o.status] || o.status;
+  $('#bar').innerHTML = o.status === 'completed' || o.status === 'partial_failure' ? '<div></div><div></div><button class="btn" id="again">Buy more</button>' : '';
+  $('#again')?.addEventListener('click', () => location.reload());
+  $('#steps').innerHTML = '';
+  $('#view').innerHTML = `<h2>${esc(title)}</h2><p class="sub">Order ${esc(o.id)} · ${money(o.quote.total)} paid. You can leave this page; setup continues.</p>
+    <div class="prog">${o.progress.map((p) => `<div class="pd"><b>${esc(p.domain)}</b><div class="chips">
+    ${Object.entries(p.steps).map(([k, s]) => `<span class="chip ${s.status}" title="${esc(s.error || '')}">${esc(LABEL[k])}${s.status === 'failed' ? ' ✕' : s.status === 'done' ? ' ✓' : ''}</span>`).join('')}</div></div>`).join('')}</div>
+    <div id="mbx"></div>`;
+  if (o.status === 'completed') loadMailboxes();
+}
+async function poll() {
+  renderProgress();
+  while (S.order && !['completed', 'partial_failure'].includes(S.order.status)) {
+    await new Promise((r) => setTimeout(r, 700));
+    try { S.order = await api('/api/orders/' + S.order.id); renderProgress(); } catch { /* retry */ }
+  }
+}
+async function loadMailboxes() {
+  const list = await api('/api/mailboxes');
+  const mine = list.filter((m) => m.orderId === S.order.id);
+  $('#mbx').innerHTML = `<div class="card" style="margin-top:16px"><b>Connected mailboxes</b><table><tr><th>Email</th><th>Provider</th><th>Warm-up</th></tr>
+    ${mine.map((m) => `<tr><td>${esc(m.email)}</td><td>${esc(m.provider)}</td><td>${esc(m.warmup)}</td></tr>`).join('')}</table></div>`;
+}
+
+(async () => { S.cfg = await api('/api/config'); render(); })();
+</script>
+</body>
+</html>

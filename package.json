@@ -1,0 +1,11 @@
+{
+  "name": "cloudlead-infra-purchase",
+  "version": "0.1.0",
+  "description": "CloudLead.ai in-app email infrastructure purchase (prototype with swappable vendor adapters)",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "engines": { "node": ">=20" }
+}
