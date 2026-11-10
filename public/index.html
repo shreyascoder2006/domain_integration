@@ -62,7 +62,7 @@ const S = {
   step: 0, cfg: null, provider: 'google', plan: 'quarterly',
   seed: '', suggestions: [], exact: null, selected: [], forwarding: '',
   persona: { first: '', last: '', perDomain: 4 }, boxes: {},  // boxes[domain] = [{firstName,lastName,emailPrefix}]
-  contact: { firstName:'', lastName:'', company:'', address:'', country:'', city:'', zip:'', phone:'' },
+  contact: { firstName:'', lastName:'', company:'', email:'', address:'', country:'', state:'', city:'', zip:'', phoneCc:'', phone:'' },
   terms: false, quote: null, error: '', busy: false, order: null, idem: crypto.randomUUID()
 };
 
@@ -143,8 +143,9 @@ function viewMailboxes() {
 function viewContact() {
   const f = (k, label, span) => `<div style="${span ? 'grid-column:1/-1' : ''}"><label>${label}</label><input data-c="${k}" value="${esc(S.contact[k])}"></div>`;
   return `<h2>Contact details</h2><p class="sub">Used to register your domains and create the mailboxes.</p>
-    <div class="card"><div class="grid">${f('firstName','First name')}${f('lastName','Last name')}${f('company','Company')}${f('address','Address',1)}
-    ${f('country','Country')}${f('city','City')}${f('zip','ZIP / postal code')}${f('phone','Phone number')}</div></div>`;
+    <div class="card"><div class="grid">${f('firstName','First name')}${f('lastName','Last name')}${f('company','Company')}${f('email','Email')}${f('address','Address',1)}
+    ${f('country','Country code (e.g. US, IN)')}${f('state','State / province')}${f('city','City')}${f('zip','ZIP / postal code')}
+    ${f('phoneCc','Phone country code (e.g. 1, 91)')}${f('phone','Phone number (digits only)')}</div></div>`;
 }
 
 /* ---------- Step 5: review ---------- */
@@ -235,7 +236,7 @@ async function search() {
 }
 
 /* ---------- Progress after payment ---------- */
-const LABEL = { register: 'Register domain', dns_base: 'SPF / DMARC / MX', mailboxes: 'Create mailboxes', dns_dkim: 'DKIM', connect: 'Connect to sending pool' };
+const LABEL = { register: 'Register domain', nameservers: 'Set up DNS zone', dns_base: 'SPF / DMARC / MX', mailboxes: 'Create mailboxes', dns_dkim: 'DKIM', connect: 'Connect to sending pool' };
 function renderProgress() {
   const o = S.order;
   const title = { paid: 'Payment received', provisioning: 'Setting up your infrastructure…', completed: 'All set! Your mailboxes are connected', partial_failure: 'Some items need attention' }[o.status] || o.status;

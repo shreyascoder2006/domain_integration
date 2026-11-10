@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { suggestedRefund, checkRefundAmount, refundedSoFar } from './lib/refunds.js';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './lib/config.js';
@@ -92,8 +93,15 @@ const route = {
     const b = await readBody(req);
     const cart = validateCart(b);
     const c = b.contact || {};
-    for (const f of ['firstName', 'lastName', 'company', 'address', 'country', 'city', 'zip', 'phone']) {
+    for (const f of ['firstName', 'lastName', 'company', 'address', 'country', 'state', 'city', 'zip', 'phoneCc', 'phone', 'email']) {
       if (!String(c[f] || '').trim()) throw httpError(400, `Contact detail missing: ${f}`);
+    }
+    // Registrars need an ISO-3166 alpha-2 country code and a deliverable email.
+    c.country = String(c.country).trim().toUpperCase();
+    if (!/^[A-Z]{2}$/.test(c.country)) throw httpError(400, 'Country must be a 2-letter code (e.g. US, IN)');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email)) throw httpError(400, 'Invalid contact email');
+    if (!/^\d{1,4}$/.test(String(c.phoneCc).replace(/\D/g, '')) || !/^\d{6,14}$/.test(String(c.phone).replace(/\D/g, ''))) {
+      throw httpError(400, 'Invalid phone number');
     }
     if (!b.acceptedTerms) throw httpError(400, 'You must accept the terms');
     let forwardingDomain = null;
@@ -141,8 +149,17 @@ const route = {
   },
 
   'GET /api/mailboxes': async () =>
-    store.listMailboxes().map(({ credentials, smtp, ...safe }) => safe) // never leak credentials
+    store.listMailboxes().map(({ credentialsEnc, smtp, ...safe }) => safe) // never leak credentials
 };
+
+const refundsInFlight = new Set();
+function requireAdmin(req) {
+  const expected = process.env.ADMIN_TOKEN;
+  if (!expected) throw httpError(403, 'Admin API is disabled (set ADMIN_TOKEN)');
+  const got = Buffer.from(String(req.headers['x-admin-token'] || ''));
+  const want = Buffer.from(expected);
+  if (got.length !== want.length || !timingSafeEqual(got, want)) throw httpError(401, 'Invalid admin token');
+}
 
 createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -163,6 +180,36 @@ createServer(async (req, res) => {
       provision(o, { providers, store }).catch((e) => console.error('retry crashed', e));
       return send(res, 202, publicOrder(o));
     }
+    // ---- Admin API (disabled unless ADMIN_TOKEN is set) ----
+    if (url.pathname.startsWith('/api/admin/')) {
+      requireAdmin(req);
+      if (req.method === 'GET' && url.pathname === '/api/admin/orders') {
+        return send(res, 200, Object.values(store.data.orders).map((o) => ({
+          ...publicOrder(o),
+          internalMargin: o.internalMargin,
+          refunds: o.refunds || [],
+          suggestedRefund: o.progress ? suggestedRefund(o) : null
+        })));
+      }
+      const ar = url.pathname.match(/^\/api\/admin\/orders\/(\w+)\/refund$/);
+      if (req.method === 'POST' && ar) {
+        const o = store.getOrder(ar[1]);
+        if (!o) throw httpError(404, 'Order not found');
+        if (refundsInFlight.has(o.id)) throw httpError(409, 'A refund for this order is already in progress');
+        refundsInFlight.add(o.id);
+        try {
+          const b = await readBody(req);
+          const amount = checkRefundAmount(o, b.amount ?? suggestedRefund(o).amount);
+          const re = await providers.payments.refund({ paymentId: o.paymentId, amount });
+          o.refunds = [...(o.refunds || []), { id: re.id, amount, reason: String(b.reason || ''), at: new Date().toISOString() }];
+          if (refundedSoFar(o) >= o.quote.total) o.status = 'refunded';
+          store.putOrder(o);
+          return send(res, 200, { ...publicOrder(o), refunds: o.refunds });
+        } finally { refundsInFlight.delete(o.id); }
+      }
+      throw httpError(404, 'Not found');
+    }
+
     const handler = route[`${req.method} ${url.pathname}`];
     if (handler) return send(res, 200, await handler(req, url));
     if (url.pathname.startsWith('/api/')) throw httpError(404, 'Not found');
