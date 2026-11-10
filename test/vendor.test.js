@@ -127,7 +127,7 @@ test('zapmail: rate limit becomes a pending wait; capacity check reports free sl
 
 /* ---- Full pipeline: real adapter + real provisioner against the fake account ---- */
 const memStore = () => ({
-  data: { orders: {}, mailboxes: [] },
+  data: { orders: {}, mailboxes: [] }, listOrders() { return Object.values(this.data.orders); },
   putOrder(o) { this.data.orders[o.id] = o; },
   addMailboxes(l) { this.data.mailboxes.push(...l); }
 });
@@ -157,7 +157,7 @@ test('pipeline with an async DNS-managing vendor: waits, resumes, completes, hid
   assert.deepEqual(nsCalls[0], ['getx.com', providers.vendor.nameServers], 'registrar points at the vendor, not our DNS');
 
   // Not due yet: the resume loop must leave it alone.
-  assert.equal(resumeDue({ providers, store: { data: { orders: { [order.id]: order } }, putOrder() {}, addMailboxes() {} } }), 0);
+  assert.equal(resumeDue({ providers, store: { listOrders: () => [order], putOrder() {}, addMailboxes() {} } }), 0);
 
   st.connections[0].status = 'SUCCESS'; makeDue(order);
   await provision(order, { providers, store });
