@@ -12,7 +12,9 @@
     "restore": "node scripts/restore.js",
     "rotate-key": "node scripts/rotate-key.js",
     "migrate:sqlite": "node scripts/migrate-to-sqlite.js",
-    "docs:openapi": "node scripts/gen-openapi.js"
+    "docs:openapi": "node scripts/gen-openapi.js",
+    "loadtest": "node scripts/loadtest.js",
+    "seed-demo": "node scripts/seed-demo.js"
   },
   "engines": { "node": ">=22.5" }
 }

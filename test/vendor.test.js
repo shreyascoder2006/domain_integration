@@ -127,7 +127,7 @@ test('zapmail: rate limit becomes a pending wait; capacity check reports free sl
 
 /* ---- Full pipeline: real adapter + real provisioner against the fake account ---- */
 const memStore = () => ({
-  data: { orders: {}, mailboxes: [] }, listOrders() { return Object.values(this.data.orders); }, listMailboxes() { return this.data.mailboxes; },
+  data: { orders: {}, mailboxes: [] }, listOrders() { return Object.values(this.data.orders); }, listMailboxes() { return this.data.mailboxes; }, mailboxesOfOrder(id) { return this.data.mailboxes.filter((m) => m.orderId === id); },
   putOrder(o) { this.data.orders[o.id] = o; },
   addMailboxes(l) { this.data.mailboxes.push(...l); }
 });

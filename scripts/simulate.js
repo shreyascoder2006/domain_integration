@@ -44,8 +44,9 @@ async function main() {
   const admin = process.env.ADMIN_TOKEN;
   if (!admin) { console.error('Set ADMIN_TOKEN (the same value the server uses).'); process.exit(2); }
 
-  const orders = await (await fetch(`${url}/api/admin/orders`, { headers: { 'x-admin-token': admin } })).json();
-  if (!Array.isArray(orders)) { console.error('Could not list orders:', orders.error || orders); process.exit(1); }
+  const listed = await (await fetch(`${url}/api/admin/orders?filter=all&limit=200`, { headers: { 'x-admin-token': admin } })).json();
+  const orders = listed.items;
+  if (!Array.isArray(orders)) { console.error('Could not list orders:', listed.error || listed); process.exit(1); }
   const subs = orders.filter((o) => o.billing).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   const order = which === 'latest' ? subs[0] : subs.find((o) => o.id === which);
   if (!order) { console.error('No subscription order found.'); process.exit(1); }
@@ -59,7 +60,7 @@ async function main() {
     const r = await fetch(`${url}/api/admin/dev/advance`, { method: 'POST', headers: { 'x-admin-token': admin, 'Content-Type': 'application/json' }, body: JSON.stringify({ days: advance }) });
     console.log(`advance ${advance} day(s)  ->  HTTP ${r.status}  ${await r.text()}`);
   }
-  const after = (await (await fetch(`${url}/api/admin/orders`, { headers: { 'x-admin-token': admin } })).json()).find((o) => o.id === order.id);
+  const after = (await (await fetch(`${url}/api/admin/orders?filter=all&limit=200`, { headers: { 'x-admin-token': admin } })).json()).items.find((o) => o.id === order.id);
   console.log(`billing now: ${after.billing.status}, paid cycles ${after.billing.paidCount}, problems: ${after.problems.map((p) => p.message).join('; ') || 'none'}`);
 }
 

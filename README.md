@@ -24,12 +24,15 @@ Open `/` for the purchase wizard, `/admin.html` (needs `ADMIN_TOKEN`) for operat
 | `npm run backup` / `npm run restore -- <file> --force` | Consistent snapshot (proves it opens, keeps the newest 14) and restore (keeps the previous data) |
 | `npm run rotate-key` | Re-encrypt every stored credential under a new `CREDENTIALS_KEY` (safe to re-run) |
 | `npm run migrate:sqlite -- data/db.json data/db.sqlite` | Move from the JSON file to SQLite (verified copy, source untouched) |
+| `npm run loadtest -- --orders 5000` | Where does it slow down? Builds a synthetic database and times lookups, timers, writes and the dashboard on either store (see [docs/capacity.md](docs/capacity.md)) |
+| `npm run seed-demo` | Fills an **empty** database with realistic sample orders (every billing situation) to explore the dashboard |
 | `npm run docs:openapi` | Regenerate `docs/openapi.json` from `lib/apiSpec.js` (a test fails if it drifts from `server.js`) |
 
 ## Documentation
 
 - [docs/runbook.md](docs/runbook.md): what every "needs attention" item means and what to do; incidents; routine tasks
 - [docs/engine-integration.md](docs/engine-integration.md): how your sending/warm-up engine uses the mailboxes this app creates
+- [docs/capacity.md](docs/capacity.md): measured limits, which store to use, what grows with the data
 - [docs/adapters.md](docs/adapters.md): writing a new vendor, registrar, gateway, email provider or storage backend
 - [docs/openapi.json](docs/openapi.json): the HTTP API
 
@@ -42,7 +45,7 @@ Open `/` for the purchase wizard, `/admin.html` (needs `ADMIN_TOKEN`) for operat
    or any `mock` adapter (`ALLOW_MOCKS=1` overrides, for demos). It warns about missing webhook secrets, `NOTIFY_PROVIDER=mock` (customers would get no email) and `PUBLIC_URL`.
 3. `GET /healthz` for load balancers; `GET /metrics` (Prometheus, needs a token) for dashboards. `SIGTERM`/`SIGINT` stop the server cleanly; half-done work resumes on the next start.
 4. Put it behind HTTPS and set `TRUST_PROXY=1`, otherwise every visitor shares one rate-limit bucket. Webhooks need a public HTTPS URL (`PUBLIC_URL`).
-5. **Data**: one JSON file (default) or SQLite (`STORE=sqlite`). Both write through on every change and are covered by the same contract test. JSON writes are atomic with a `.bak` copy; if the file is ever
+5. **Data**: **use SQLite in production (`STORE=sqlite`)**: the JSON file (the default, for development) rewrites itself on every change and gets slow at a few hundred orders ([docs/capacity.md](docs/capacity.md)). Both write through on every change and are covered by the same contract test. JSON writes are atomic with a `.bak` copy; if the file is ever
    unreadable the server **refuses to start** and keeps a copy instead of starting empty. **Back it up** (`npm run backup`, hourly): it holds orders, billing state and encrypted credentials.
    One server process per data file.
 6. **Protection**: per-IP rate limits, lockout after 10 wrong admin/engine tokens, security headers, constant-time token checks, secrets redacted from logs, buyers' contact details never in the public order view,

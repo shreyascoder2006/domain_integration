@@ -103,6 +103,53 @@ function contract(name, make) {
     assert.equal(s2.pruneOutbox(30 * 86_400_000), 1);
     assert.deepEqual(reopen().listOutbox().map((i) => i.id), ['e2']);
   });
+
+  t('indexes: lookups follow replaced records, windows are newest-first, outbox status sets track changes, and all of it survives a reopen', ({ store, reopen }) => {
+    // A record replaced by a new object with the same id must not leave a stale lookup behind.
+    store.putOrder({ id: 'o1', billing: { subscriptionId: 'sub_A' }, contact: { email: 'a@co.io' } });
+    store.putOrder({ id: 'o1', billing: { subscriptionId: 'sub_B' }, contact: { email: 'a@co.io' } });
+    assert.equal(store.findOrderBySubscription('sub_A'), undefined);
+    assert.equal(store.findOrderBySubscription('sub_B').id, 'o1');
+    assert.equal(store.findOrdersByEmail('A@CO.io').length, 1);
+
+    const h = 3_600_000, now = Date.now();
+    for (const [id, age] of [['c_old', 30 * h], ['c_mid', 5 * h], ['c_new', 1 * h]]) store.putCheckout({ id, status: 'paid', createdAt: new Date(now - age).toISOString(), idempotencyKey: 'k_' + id });
+    assert.deepEqual(store.recentCheckouts(now - 6 * h).map((c) => c.id), ['c_new', 'c_mid'], 'newest first, only inside the window');
+    assert.deepEqual(store.recentCheckouts(now - 100 * h).map((c) => c.id), ['c_new', 'c_mid', 'c_old']);
+    store.putCheckout(store.getCheckout('c_new'));      // a re-put must not duplicate it in the window
+    assert.equal(store.recentCheckouts(now - 6 * h).length, 2);
+
+    store.addMailboxes([{ email: 'x@a.com', orderId: 'o1' }, { email: 'y@a.com', orderId: 'o1' }, { email: 'z@b.com', orderId: 'o2' }]);
+    assert.deepEqual(store.mailboxesOfOrder('o1').map((m) => m.email), ['x@a.com', 'y@a.com']);
+    assert.deepEqual(store.mailboxesOfOrder('nope'), []);
+
+    const mk = (id, status, key) => store.addOutbox({ id, key, status, attempts: 0 });
+    mk('e1', 'pending', 'k1'); mk('e2', 'pending', 'k2'); mk('e3', 'sent', 'k3');
+    assert.deepEqual(store.outboxWithStatus('pending').map((i) => i.id).sort(), ['e1', 'e2']);
+    assert.equal(store.hasOutboxKey('k3'), true);
+    assert.equal(store.hasOutboxKey('k9'), false);
+    const e1 = store.listOutbox().find((i) => i.id === 'e1'); e1.status = 'sent'; store.putOutbox(e1);
+    const e2 = store.listOutbox().find((i) => i.id === 'e2'); e2.status = 'dead'; store.putOutbox(e2);
+    assert.deepEqual([store.outboxWithStatus('pending').length, store.outboxWithStatus('dead').map((i) => i.id)], [0, ['e2']]);
+
+    const s2 = reopen();
+    assert.equal(s2.findOrderBySubscription('sub_B').id, 'o1');
+    assert.deepEqual(s2.recentCheckouts(now - 6 * h).map((c) => c.id), ['c_new', 'c_mid']);
+    assert.equal(s2.findCheckoutByKey('k_c_mid').id, 'c_mid');
+    assert.deepEqual(s2.mailboxesOfOrder('o2').map((m) => m.email), ['z@b.com']);
+    assert.deepEqual(s2.outboxWithStatus('dead').map((i) => i.id), ['e2']);
+    assert.equal(s2.hasOutboxKey('k1'), true);
+  });
+
+  t('indexes: purged checkouts disappear from every lookup and from the window', ({ store }) => {
+    const old = new Date(Date.now() - 20 * 86_400_000).toISOString();
+    store.putCheckout({ id: 'c_stale', status: 'awaiting_payment', createdAt: old, idempotencyKey: 'ks', gatewayOrderId: 'order_s', gatewaySubscriptionId: 'sub_s' });
+    assert.equal(store.purgeStaleCheckouts(14 * 86_400_000), 1);
+    assert.deepEqual([store.findCheckoutByKey('ks'), store.findCheckoutByGatewayOrder('order_s'), store.findCheckoutBySubscription('sub_s')], [undefined, undefined, undefined]);
+    assert.deepEqual(store.recentCheckouts(0), []);
+    store.putCheckout({ id: 'c_stale', status: 'awaiting_payment', createdAt: new Date().toISOString(), idempotencyKey: 'ks2' });   // the same id can come back
+    assert.equal(store.recentCheckouts(0).length, 1);
+  });
 }
 
 contract('json', () => {

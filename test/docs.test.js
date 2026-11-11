@@ -53,7 +53,7 @@ test('docs: the generated openapi.json is committed and up to date', () => {
 });
 
 test('startup: production checks the new tokens and warns about the demo webhook secret', () => {
-  const prod = { NODE_ENV: 'production', CREDENTIALS_KEY: 'k', ADMIN_TOKEN: 'x'.repeat(30), TRUST_PROXY: '1', REGISTRAR: 'namesilo', DNS_PROVIDER: 'cloudflare', MAILBOX_VENDOR: 'zapmail', PAYMENTS: 'razorpay', RAZORPAY_WEBHOOK_SECRET: 's', ZAPMAIL_WEBHOOK_SECRET: 's', ZAPMAIL_WORKSPACE_KEY: 'w', NOTIFY_PROVIDER: 'resend', PUBLIC_URL: 'https://x.test' };
+  const prod = { NODE_ENV: 'production', CREDENTIALS_KEY: 'k', ADMIN_TOKEN: 'x'.repeat(30), TRUST_PROXY: '1', REGISTRAR: 'namesilo', DNS_PROVIDER: 'cloudflare', MAILBOX_VENDOR: 'zapmail', PAYMENTS: 'razorpay', RAZORPAY_WEBHOOK_SECRET: 's', ZAPMAIL_WEBHOOK_SECRET: 's', ZAPMAIL_WORKSPACE_KEY: 'w', NOTIFY_PROVIDER: 'resend', PUBLIC_URL: 'https://x.test', STORE: 'sqlite' };
   assert.deepEqual(checkEnv(prod), { errors: [], warnings: [] });
   assert.ok(checkEnv({ ...prod, ENGINE_TOKEN: 'short' }).errors.some((e) => /ENGINE_TOKEN/.test(e)));
   assert.ok(checkEnv({ ...prod, METRICS_TOKEN: 'short' }).errors.some((e) => /METRICS_TOKEN/.test(e)));

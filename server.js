@@ -19,7 +19,7 @@ import { log } from './lib/log.js';
 import { createMailer } from './lib/mailers.js';
 import { createNotifier } from './lib/notify.js';
 import { createAlerter, sinksFromEnv } from './lib/alerts.js';
-import { orderProblems } from './lib/problems.js';
+import { listOrdersPage } from './lib/adminList.js';
 import { createEngineApi } from './lib/engine.js';
 import { buildReceipts, sellerFromEnv } from './lib/receipts.js';
 import { createAbuseGuard } from './lib/abuse.js';
@@ -236,7 +236,7 @@ const server = createServer(async (req, res) => {
         limit('manage', req);
         if (!o) throw httpError(404, 'Order not found');
         requireManage(req, o); // mailbox addresses and billing history belong to the buyer
-        if (sub[2] === 'mailboxes') return send(res, 200, store.listMailboxes().filter((x) => x.orderId === o.id).map(safeMailbox));
+        if (sub[2] === 'mailboxes') return send(res, 200, store.mailboxesOfOrder(o.id).map(safeMailbox));
         if (sub[2] === 'receipts') {
           const receipts = buildReceipts(o, sellerFromEnv());
           return send(res, 200, { receipts: [...receipts], credits: receipts.credits || [] });
@@ -261,20 +261,15 @@ const server = createServer(async (req, res) => {
     if (url.pathname.startsWith('/api/admin/')) {
       requireAdmin(req);
       if (req.method === 'GET' && url.pathname === '/api/admin/orders') {
-        return send(res, 200, store.listOrders().map((o) => ({
-          ...publicOrder(o, { admin: true }),
-          internalMargin: o.internalMargin,
-          billing: o.billing || null, // full detail: plan ids, history, renewals, anything needing attention
-          problems: orderProblems(o),
-          refunds: o.refunds || [],
-          suggestedRefund: o.progress ? suggestedRefund(o) : null
-        })));
+        const q = url.searchParams;
+        return send(res, 200, listOrdersPage(store, { filter: q.get('filter') || 'attention', q: q.get('q') || '', limit: q.get('limit'), offset: q.get('offset') }));
       }
       if (req.method === 'GET' && url.pathname === '/api/admin/mailboxes') {
         return send(res, 200, store.listMailboxes().map(safeMailbox));
       }
       if (req.method === 'GET' && url.pathname === '/api/admin/outbox') {
-        return send(res, 200, { mailer: mailer.name, items: store.listOutbox().slice(-200).reverse(), sent: mailer.sent?.slice(-50).reverse() ?? null });
+        const items = store.listOutbox().slice(-200).reverse().map((i) => ({ ...i, to: store.getOrder(i.orderId)?.contact?.email || null }));
+        return send(res, 200, { mailer: mailer.name, items, sent: mailer.sent?.slice(-50).reverse() ?? null });
       }
       if (req.method === 'GET' && url.pathname === '/api/admin/vendor') {
         if (!providers.vendor.getCapacity) return send(res, 200, { vendor: providers.vendor.name, capacity: null });

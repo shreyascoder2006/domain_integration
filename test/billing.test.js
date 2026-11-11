@@ -73,7 +73,7 @@ function setup({ failRenew = 0, failPlan = 0, failCancel = false } = {}) {
     billing: svc.init({ schedule, subscriptionId: 'sub_1', planIds: { renewal: 'plan_r', base: 'plan_b' }, subscription: { paid_count: 1, current_end: (clock.t + 90 * DAY) / 1000 } })
   };
   store.putOrder(order);
-  store.data.mailboxes.push({ orderId: 'ord_1', email: 'x@a.com', status: 'ready_for_warmup' }, { orderId: 'ord_1', email: 'y@b.com', status: 'ready_for_warmup' });
+  store.addMailboxes([{ orderId: 'ord_1', email: 'x@a.com', status: 'ready_for_warmup' }, { orderId: 'ord_1', email: 'y@b.com', status: 'ready_for_warmup' }]);
   const ev = (type, sub = {}) => ({ type, subscription: { id: 'sub_1', ...sub } });
   const charged = (n) => svc.handleEvent(ev('subscription.charged', { paid_count: n, current_end: (clock.t + 90 * DAY) / 1000 }));
   return { svc, store, order, calls, clock, ev, charged, b: order.billing };

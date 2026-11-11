@@ -177,7 +177,7 @@ test('refunds: pro-rata for failed domains, capped by remaining amount', () => {
 test('provisioner: completes, seals credentials, never exposes them', async () => {
   process.env.MOCK_DELAY_MS = '1';
   const providers = loadProviders();
-  const mem = { data: { orders: {}, mailboxes: [] }, listOrders() { return Object.values(this.data.orders); }, listMailboxes() { return this.data.mailboxes; }, putOrder(o) { this.data.orders[o.id] = o; }, addMailboxes(l) { this.data.mailboxes.push(...l); } };
+  const mem = { data: { orders: {}, mailboxes: [] }, listOrders() { return Object.values(this.data.orders); }, listMailboxes() { return this.data.mailboxes; }, mailboxesOfOrder(id) { return this.data.mailboxes.filter((m) => m.orderId === id); }, putOrder(o) { this.data.orders[o.id] = o; }, addMailboxes(l) { this.data.mailboxes.push(...l); } };
   const order = {
     id: 'ord_t', userId: 'u', provider: 'google', forwardingDomain: 'acme.com', contact: {},
     domains: [{ name: 'getx.com', mailboxes: [{ firstName: 'A', lastName: 'B', emailPrefix: 'a.b' }] }]

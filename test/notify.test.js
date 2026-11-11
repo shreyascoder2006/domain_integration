@@ -136,7 +136,7 @@ function billingHarness() {
   const q = quote({ provider: 'google', plan: 'quarterly', domains: ['getx.com'], mailboxes: box(2) });
   const order = makeOrder({ quote: q });
   order.billing = svc.init({ schedule: buildSchedule(q), subscriptionId: 'sub_1', planIds: { renewal: 'pr', base: 'pb' }, subscription: { paid_count: 1, current_end: (clock.t + 90 * DAY) / 1000 } });
-  store.putOrder(order); store.data.mailboxes.push({ orderId: 'ord_1', email: 'a@getx.com', status: 'ready_for_warmup' });
+  store.putOrder(order); store.addMailboxes([{ orderId: 'ord_1', email: 'a@getx.com', status: 'ready_for_warmup' }]);
   const ev = (type, sub = {}) => ({ type, subscription: { id: 'sub_1', ...sub } });
   const types = () => store.listOutbox().map((i) => i.type);
   return { store, mailer, clock, svc, notifier, order, ev, types, b: order.billing };

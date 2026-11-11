@@ -46,8 +46,10 @@
 <main>
   <div id="msg"></div>
   <div class="cards" id="cards"></div>
+  <input id="q" type="search" placeholder="Search order id, email, company or domain" aria-label="Search orders" style="max-width:360px;margin-bottom:12px">
   <div class="filters" id="filters"></div>
   <div id="table"></div>
+  <div id="pager" class="filters" style="margin-top:12px;align-items:center"></div>
   <div id="outbox" hidden></div>
 </main>
 
@@ -83,40 +85,39 @@ function localProblems(o) {
   return p;
 }
 
+const PAGE = 50;
+let page = { total: 0, counts: {}, items: [] }, q = '', offset = 0, timer;
+
 async function load() {
   flash('');
+  try { sessionStorage.setItem('cl_admin', $('#token').value); } catch { /* storage blocked */ }
   try {
-    sessionStorage.setItem('cl_admin', $('#token').value);
-  } catch { /* ignore */ }
-  try {
-    [orders, vendor] = await Promise.all([call('/api/admin/orders'), call('/api/admin/vendor').catch((e) => ({ error: e.message }))]);
-    orders.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    const qs = new URLSearchParams({ filter, q, limit: PAGE, offset });
+    [page, vendor] = await Promise.all([call('/api/admin/orders?' + qs), call('/api/admin/vendor').catch((e) => ({ error: e.message }))]);
+    orders = page.items;
     render();
-  } catch (e) { flash(e.message); $('#cards').innerHTML = ''; $('#table').innerHTML = ''; }
+  } catch (e) { flash(e.message); $('#cards').innerHTML = ''; $('#table').innerHTML = ''; $('#pager').innerHTML = ''; }
 }
 
 function render() {
-  const attention = orders.filter((o) => problems(o).length);
-  const count = (f) => orders.filter(f).length;
-  const cap = vendor?.capacity;
+  const c = page.counts, cap = vendor?.capacity;
   const cards = [
-    ['Orders', orders.length], ['Needs attention', attention.length, attention.length ? 'bad' : ''],
-    ['Active subscriptions', count((o) => o.billing?.status === 'active')],
-    ['Past due', count((o) => o.billing?.status === 'past_due'), count((o) => o.billing?.status === 'past_due') ? 'bad' : ''],
-    ['First-payment margin', money(orders.reduce((s, o) => s + (o.internalMargin || 0), 0))],
+    ['Orders', c.orders], ['Needs attention', c.attention, c.attention ? 'bad' : ''], ['Active subscriptions', c.active],
+    ['Past due / suspended', c.pastDue, c.pastDue ? 'bad' : ''], ['First-payment margin', money(c.margin)],
     ['Vendor', vendor?.error ? 'error' : esc(vendor?.vendor || '-')]
   ];
   if (cap?.walletBalanceUsd != null) cards.push(['Vendor wallet', money(cap.walletBalanceUsd)]);
   for (const [k, v] of Object.entries(cap?.providers || {})) cards.push([`${k} free slots`, v.availableMailboxes ?? '-', (v.availableMailboxes ?? 1) < 10 ? 'bad' : '']);
-  $('#cards').innerHTML = cards.map(([l, n, c]) => `<div class="card ${c || ''}"><div class="n">${typeof n === 'string' && n.startsWith('$') ? esc(n) : esc(n)}</div><div class="l">${esc(l)}</div></div>`).join('');
+  $('#cards').innerHTML = cards.map(([l, n, cls]) => `<div class="card ${cls || ''}"><div class="n">${esc(n)}</div><div class="l">${esc(l)}</div></div>`).join('');
 
-  const filters = { attention: 'Needs attention', all: 'All orders', past_due: 'Past due', failed: 'Failed' };
+  const filters = { attention: 'Needs attention', all: 'All orders', past_due: 'Past due', failed: 'Failed', active: 'Active' };
   $('#filters').innerHTML = Object.entries(filters).map(([k, v]) => `<button data-f="${k}" class="${filter === k ? 'on' : ''}">${esc(v)}</button>`).join('');
-  const shown = orders.filter((o) => filter === 'all' ? true : filter === 'attention' ? problems(o).length
-    : filter === 'past_due' ? ['past_due', 'suspended', 'terminated'].includes(o.billing?.status) : o.status === 'partial_failure');
 
-  $('#table').innerHTML = shown.length ? `<table><tr><th>Order</th><th>Created</th><th>Status</th><th>Billing</th><th>Total</th><th>Margin</th><th>Notes</th></tr>
-    ${shown.map((o) => row(o)).join('')}</table>` : '<div class="msg info">Nothing here.</div>';
+  $('#table').innerHTML = page.items.length ? `<table><tr><th>Order</th><th>Created</th><th>Status</th><th>Billing</th><th>Total</th><th>Margin</th><th>Notes</th></tr>
+    ${page.items.map((o) => row(o)).join('')}</table>` : '<div class="msg info">Nothing here.</div>';
+  const from = page.total ? offset + 1 : 0, to = offset + page.items.length;
+  $('#pager').innerHTML = `<span class="muted">Showing ${from}-${to} of ${page.total}</span>
+    <button id="prev" ${offset === 0 ? 'disabled' : ''}>Previous</button><button id="nextp" ${to >= page.total ? 'disabled' : ''}>Next</button>`;
   bind();
 }
 
@@ -155,7 +156,9 @@ function detail(o) {
 }
 
 function bind() {
-  document.querySelectorAll('[data-f]').forEach((b) => b.onclick = () => { filter = b.dataset.f; render(); });
+  document.querySelectorAll('[data-f]').forEach((b) => b.onclick = () => { filter = b.dataset.f; offset = 0; load(); });
+  $('#prev')?.addEventListener('click', () => { offset = Math.max(0, offset - PAGE); load(); });
+  $('#nextp')?.addEventListener('click', () => { offset += PAGE; load(); });
   document.querySelectorAll('tr.row').forEach((r) => r.onclick = () => { const id = r.dataset.o; open.has(id) ? open.delete(id) : open.add(id); render(); });
   document.querySelectorAll('[data-act]').forEach((b) => b.onclick = async (e) => {
     e.stopPropagation();
@@ -179,12 +182,13 @@ $('#outboxBtn').onclick = async () => {
   if (!box.hidden) { box.hidden = true; return; }
   try {
     const d = await call('/api/admin/outbox');
-    const email = (id) => orders.find((o) => o.id === id)?.contact?.email || '';
+    
     box.innerHTML = `<h4 style="margin:24px 0 8px">Customer emails (${esc(d.mailer)})</h4><table><tr><th>Created</th><th>Type</th><th>To</th><th>Status</th><th>Tries</th><th>Error</th></tr>` +
-      (d.items.map((i) => `<tr><td>${esc(when(i.createdAt))}</td><td>${esc(i.type)}</td><td>${esc(email(i.orderId))}</td><td>${tag(i.status, i.status === 'sent' ? 'ok' : i.status === 'dead' ? 'bad' : 'warn')}</td><td>${esc(i.attempts)}</td><td class="err">${esc(i.error || '')}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">No emails yet.</td></tr>') + '</table>';
+      (d.items.map((i) => `<tr><td>${esc(when(i.createdAt))}</td><td>${esc(i.type)}</td><td>${esc(i.to || '')}</td><td>${tag(i.status, i.status === 'sent' ? 'ok' : i.status === 'dead' ? 'bad' : 'warn')}</td><td>${esc(i.attempts)}</td><td class="err">${esc(i.error || '')}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">No emails yet.</td></tr>') + '</table>';
     box.hidden = false;
   } catch (e) { flash(e.message); }
 };
+$('#q').addEventListener('input', (e) => { clearTimeout(timer); timer = setTimeout(() => { q = e.target.value; offset = 0; load(); }, 300); });
 $('#load').onclick = load;
 $('#token').addEventListener('keydown', (e) => e.key === 'Enter' && load());
 $('#tick').onclick = async () => { try { await call('/api/admin/billing/tick', { method: 'POST', body: {} }); flash('Timers ran.', 'info'); await load(); } catch (e) { flash(e.message); } };
